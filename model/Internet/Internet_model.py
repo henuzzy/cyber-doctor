@@ -1,62 +1,78 @@
-'''联网搜索的RAG检索模型类'''
-from model.model_base import Modelbase
-from model.model_base import ModelStatus
+"""Milvus-backed temporary retriever for internet search results."""
 
 import os
+
 from env import get_app_root
-
-from langchain_community.embeddings import ModelScopeEmbeddings
-from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_community.document_loaders import DirectoryLoader, MHTMLLoader, UnstructuredHTMLLoader
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores.faiss import FAISS
+from model.RAG.milvus_store import (
+    get_config_value,
+    get_embedding,
+    get_milvus_vectorstore,
+    get_search_top_k,
+)
+from model.model_base import Modelbase, ModelStatus
 
-from config.config import Config
 
-# 检索模型
 class InternetModel(Modelbase):
-    
     _retriever: VectorStoreRetriever
 
-    def __init__(self,*args,**krgs):
-        super().__init__(*args,**krgs)
-
-        # 此处请自行改成下载embedding模型的位置
-        self._embedding_model_path =Config.get_instance().get_with_nested_params("model", "embedding", "model-name")
-        self._text_splitter = RecursiveCharacterTextSplitter
-        #self._embedding = OpenAIEmbeddings()
-        self._embedding = ModelScopeEmbeddings(model_id=self._embedding_model_path)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._embedding = get_embedding()
         self._data_path = os.path.join(get_app_root(), "data/cache/internet")
-        
-        #self._logger: Logger = Logger("rag_retriever")
+        self._collection_name = str(
+            get_config_value(
+                "cyber_doctor_internet_cache",
+                "rag",
+                "milvus",
+                "internet-collection-name",
+            )
+        )
 
-    # 建立向量库
     def build(self):
-        # 加载html文件
-        html_loader = DirectoryLoader(self._data_path, glob="**/*.html", loader_cls=UnstructuredHTMLLoader, silent_errors=True, use_multithreading=True)
+        html_loader = DirectoryLoader(
+            self._data_path,
+            glob="**/*.html",
+            loader_cls=UnstructuredHTMLLoader,
+            silent_errors=True,
+            use_multithreading=True,
+        )
         html_docs = html_loader.load()
-        
-        mhtml_loader = DirectoryLoader(self._data_path, glob="**/*.mhtml", loader_cls=MHTMLLoader, silent_errors=True, use_multithreading=True)
-        mhtml_docs = mhtml_loader.load()
-        
-        
-        #合并文档
-        docs =  html_docs + mhtml_docs
-        
-        # 创建一个 RecursiveCharacterTextSplitter 对象，用于将文档分割成块，chunk_size为最大块大小，chunk_overlap块之间可以重叠的大小
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=100)
-        splits = text_splitter.split_documents(docs)
-        
-        # 使用 FAISS 创建一个向量数据库，存储分割后的文档及其嵌入向量
-        vectorstore = FAISS.from_documents(documents=splits, embedding=self._embedding)
-        # 将向量存储转换为检索器，设置检索参数 k 为 6，即返回最相似的 6 个文档
-        self._retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
-        
 
-        
+        mhtml_loader = DirectoryLoader(
+            self._data_path,
+            glob="**/*.mhtml",
+            loader_cls=MHTMLLoader,
+            silent_errors=True,
+            use_multithreading=True,
+        )
+        mhtml_docs = mhtml_loader.load()
+        docs = html_docs + mhtml_docs
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=int(get_config_value(2000, "rag", "chunk-size")),
+            chunk_overlap=int(get_config_value(100, "rag", "chunk-overlap")),
+        )
+        splits = text_splitter.split_documents(docs)
+
+        vectorstore = get_milvus_vectorstore(
+            embedding=self._embedding,
+            drop_old=True,
+            collection_name=self._collection_name,
+        )
+        if splits:
+            ids = [f"internet_{index}" for index in range(len(splits))]
+            vectorstore.add_documents(splits, ids=ids)
+
+        self._retriever = vectorstore.as_retriever(search_kwargs={"k": get_search_top_k()})
+        self._model_status = ModelStatus.READY
+
     @property
-    def retriever(self)-> VectorStoreRetriever:
+    def retriever(self) -> VectorStoreRetriever:
         self.build()
         return self._retriever
+
 
 INSTANCE = InternetModel()

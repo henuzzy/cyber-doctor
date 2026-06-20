@@ -13,6 +13,7 @@ rag:
   search-top-k: 6
   milvus:
     collection-name: cyber_doctor_knowledge
+    internet-collection-name: cyber_doctor_internet_cache
     manifest-path: ./data/vectorstore/milvus_manifest.json
 
 model:
@@ -26,7 +27,7 @@ model:
     # modelscope模型名称和版本，可在modelscope官网查看，会自动下载，注意斜杠方向”/“
     model-name: iic/nlp_corom_sentence-embedding_chinese-base
     model-version: v1.1.0
-    device: cpu
+    device: cuda
 
 # 知识图谱配置。仅在要使用知识图谱功能时需要配置
 database:

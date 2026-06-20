@@ -72,6 +72,10 @@ def get_search_top_k() -> int:
     return int(get_config_value(6, "rag", "search-top-k"))
 
 
+def get_embedding_device() -> str:
+    return str(get_config_value("cpu", "model", "embedding", "device"))
+
+
 def get_embedding() -> ModelScopeEmbeddings:
     embedding_download_path = Config.get_instance().get_with_nested_params(
         "model", "embedding", "model-path"
@@ -84,13 +88,20 @@ def get_embedding() -> ModelScopeEmbeddings:
     if not os.path.exists(embedding_model_path):
         snapshot_download(embedding_model_name, cache_dir=embedding_download_path)
 
-    return ModelScopeEmbeddings(model_id=embedding_model_path)
+    return ModelScopeEmbeddings(
+        model_id=embedding_model_path,
+        model_kwargs={"device": get_embedding_device()},
+    )
 
 
-def get_milvus_vectorstore(embedding=None, drop_old: bool = False) -> Milvus:
+def get_milvus_vectorstore(
+    embedding=None,
+    drop_old: bool = False,
+    collection_name: str | None = None,
+) -> Milvus:
     return Milvus(
         embedding_function=embedding or get_embedding(),
-        collection_name=get_milvus_collection_name(),
+        collection_name=collection_name or get_milvus_collection_name(),
         connection_args=get_milvus_connection_args(),
         drop_old=drop_old,
         auto_id=False,
