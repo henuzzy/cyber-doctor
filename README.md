@@ -38,7 +38,6 @@ https://www.bilibili.com/video/BV1CU2aYpEn2
 ## 功能特色
 
 - **多功能多模态整合，借助AI智能体判断任务的种类，将多个模型整合工作，解决复杂问题。**
-- **单独的语音对话模块，语音输入语音输出，只需要会说话就能使用，降低大模型学习成本。**
 
 ## 功能介绍
 
@@ -47,13 +46,9 @@ https://www.bilibili.com/video/BV1CU2aYpEn2
 | 功能         | 功能介绍                                                                                                 |
 | ------------ | -------------------------------------------------------------------------------------------------------- |
 | 图片识别     | 借助多模态大模型的能力，识别图片中的图像和文字。可用于识别病历，识别药品说明书等                         |
-| 视频生成     | 借助多模态大模型的能力，生成视频                                                                         |
 | 图片生成     | 借助多模态大模型的能力，生成图片                                                                         |
-| ppt/word生成 | 可自动生成固定格式的纯文字PPT和Word文档                                                                  |
 | 多轮对话     | 具有记忆功能，对话界面的所有内容会作为历史记录一同输入大模型                                             |
 | 检索增强对话 | 多模态输入框不只能输入文本，还能上传文件。大模型会根据文件内容调整输出                                   |
-| 语音输入     | 多模态输入框可以上传音频文件。进入语音对话模式可以直接使用麦克风进行语音输入                             |
-| 语音输出     | 要求大模型以语音的形式进行输出时，大模型会返回一段音频，支持多种方言，在语音对话模式下默认以语言形式输出 |
 | 知识图谱增强 | 支持配置相关领域的neo4j知识图谱，用专业知识改善大模型输出                                                |
 | 知识库增强   | 支持利用多种格式的文件作为专属知识库，大模型会结合知识库中的文件进行输出                                 |
 | 联网检索增强 | 通过自动化爬虫检索网络上的相关信息，利用网络增强大模型知识的时效性                                       |
@@ -64,11 +59,8 @@ https://www.bilibili.com/video/BV1CU2aYpEn2
 
 ![](README/病历识别.png)
 
-### PPT/Word生成
 
-![](README/PPT&Word生成.png)
 
-![](README/PPT&Word展示.png)
 
 ### 知识图谱检索增强：
 
@@ -88,7 +80,6 @@ https://www.bilibili.com/video/BV1CU2aYpEn2
 - **modelscope & huggingface**：预训练大模型的下载与配置
 - **RAG**：结合检索与生成的技术，用于增强生成式模型的回答质量
 - **Knowledge Graph (Neo4j)**：Neo4j图数据库的配置和Cypher语句操作
-- **TTS (edge-tts)，STT (whisper)**：语音转文本，文本转语音
 - **OpenAi & zhipuai**：相关大模型sdk调用方法
 
 Option：
@@ -225,10 +216,7 @@ cyber-doctor/
 │   ├── Internet_prompt.py            # 大模型特征工程，提取搜索关键词
 │   └── retrieve_Internet.py          # 调用model/Internet接口检索搜索结果
 ├── README/                         # 存放项目文档相关资源
-├── audio/                          # 音频处理相关功能模块
 │   ├── __init__.py                   # 包初始化文件
-│   ├── audio_extract.py              # 大模型特征工程，提取TTS目标文本和语种
-│   └── audio_generate.py             # 封装调用edge-tts语音合成接口
 ├── client/                         # 大模型客户端模块，作为用户与API的桥梁
 │   ├── __init__.py                   # 包初始化文件
 │   ├── LLMclientbase.py              # 大模型客户端基类定义
@@ -262,11 +250,6 @@ cyber-doctor/
 │       ├── __init__.py                 # 包初始化文件
 │       ├── retrieve_model.py           # 构建知识库RAG向量库
 │       └── retrieve_service.py         # 知识库RAG向量库接口
-├── ppt_docx/                       # PPT和Word文档生成模块
-│   ├── docx_content.py               # 大模型生成Word内容
-│   ├── docx_generation.py            # Word内容转换为Word文档
-│   ├── ppt_content.py                # 大模型生成PPT内容
-│   └── ppt_generation.py             # PPT内容转换为PPT文档
 ├── qa/                             # 问答系统核心模块
 │   ├── __init__.py                   # 包初始化文件
 │   ├── answer.py                     # 根据问题类型选择对应的工具函数生成回答

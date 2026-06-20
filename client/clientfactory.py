@@ -1,7 +1,6 @@
 '''向外部构建不同大模型代理的接口，构建完成后返回一个大模型代理'''
 from client.ourAPI.client import OurAPI
 from client.zhipuAPI.client import Image_generate_client, Image_describe_client
-from client.zhipuAPI.client import Video_generate_client
 from env import get_env_value
 from qa.purpose_type import userPurposeType
 
@@ -33,8 +32,6 @@ class Clientfactory:
             return Image_generate_client
         if client_type == userPurposeType.ImageDescribe:
             return Image_describe_client
-        if client_type == userPurposeType.Video:
-            return Video_generate_client
 
         # 默认情况下使用文本生成模型
         return OurAPI()

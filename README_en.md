@@ -47,13 +47,9 @@ The imbalance in healthcare resources has long been a key issue of concern in so
 | Function                      | Function introduction                                                                                                                                                                                           |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Image recognition             | Recognize images and text in pictures with the help of multi-modal large model capabilities. Can be used to identify medical records, identify drug instructions, etc.                                          |
-| Video generation              | Use the power of multi-modal large models to generate videos                                                                                                                                                    |
 | Image generation              | Use the ability of multi-modal large models to generate images                                                                                                                                                  |
-| ppt/word generation           | Can automatically generate fixed-format plain text PPT and Word documents                                                                                                                                       |
 | Multiple rounds of dialogue   | With memory function, all contents of the dialogue interface will be entered into the large model as a historical record                                                                                        |
 | Search enhanced dialogue      | The multi-modal input box can not only enter text, but also upload files. Large models adjust output based on file content                                                                                      |
-| Voice input                   | Multi-modal input box can upload audio files. Enter the voice conversation mode to directly use the microphone for voice input                                                                                  |
-| Voice output                  | When the large model is required to output in the form of voice, the large model will return a piece of audio, supporting multiple dialects. In the voice dialogue mode, the default output is in language form |
 | Knowledge graph enhancement   | Supports the configuration of neo4j knowledge graph in related fields, and uses professional knowledge to improve large model output                                                                            |
 | Knowledge base enhancement    | Supports the use of files in multiple formats as a dedicated knowledge base, and large models will be combined with files in the knowledge base for output                                                      |
 | Network retrieval enhancement | Retrieve relevant information on the network through automated crawlers, and use the network to enhance the timeliness of large model knowledge                                                                 |
@@ -64,13 +60,7 @@ The imbalance in healthcare resources has long been a key issue of concern in so
 
 ![](README/病历识别.png)
 
-### PPT/Word generation
 
-![](README/PPT&Word生成.png)
-
-![](README/PPT&Word展示.png)
-
-### Knowledge graph retrieval enhancement:
 
 ![](README/知识图谱检索.png)
 
@@ -88,7 +78,6 @@ The imbalance in healthcare resources has long been a key issue of concern in so
 - **modelscope & huggingface**: download and configuration of pre-trained large models
 - **RAG**: a technology that combines retrieval and generation to enhance the answer quality of generative models
 - **Knowledge Graph (Neo4j)**: Neo4j graph database configuration and Cypher statement operations
-- **TTS (edge-tts), STT (whisper)**: speech to text, text to speech
 - **OpenAi & zhipuai**: Related large model sdk calling methods
 
 Option:
@@ -219,10 +208,7 @@ cyber-doctor/
 │   ├── Internet_prompt.py            # Large model feature engineering, extracting search keywords
 │   └── retrieve_Internet.py          # Calls model/Internet interface to retrieve search results
 ├── README/                         # Stores project documentation related resources
-├── audio/                          # Audio processing related function module
 │   ├── __init__.py                   # Package initialization file
-│   ├── audio_extract.py              # Large model feature engineering, extracting TTS target text and language
-│   └── audio_generate.py             # Encapsulates edge-tts voice synthesis interface calls
 ├── client/                         # Large model client module, serves as bridge between user and API
 │   ├── __init__.py                   # Package initialization file
 │   ├── LLMclientbase.py              # Large model client base class definition
@@ -256,11 +242,6 @@ cyber-doctor/
 │       ├── __init__.py                 # Package initialization file
 │       ├── retrieve_model.py           # Builds Knowledge Base RAG vector store
 │       └── retrieve_service.py         # Knowledge Base RAG vector store interface
-├── ppt_docx/                       # PPT and Word document generation module
-│   ├── docx_content.py               # Large model generates Word content
-│   ├── docx_generation.py            # Converts Word content to Word document
-│   ├── ppt_content.py                # Large model generates PPT content
-│   └── ppt_generation.py             # Converts PPT content to PPT document
 ├── qa/                             # QA system core module
 │   ├── __init__.py                   # Package initialization file
 │   ├── answer.py                     # Generates answers by selecting corresponding tool functions based on question type

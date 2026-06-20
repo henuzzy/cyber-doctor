@@ -2,15 +2,9 @@
 
 import base64
 from typing import Callable, List, Dict, Tuple
-import time
-import json
 from client.clientfactory import Clientfactory
 from qa.purpose_type import userPurposeType
 from pathlib import Path
-from ppt_docx.ppt_generation import generate as generate_ppt
-from ppt_docx.ppt_content import generate_ppt_content
-from ppt_docx.docx_generation import generate_docx_content as generate_docx
-from ppt_docx.docx_content import generate_docx_content
 from model.KG.search_service import search
 from kg.Graph import GraphDao
 from config.config import Config
@@ -160,75 +154,6 @@ def process_image_describe_tool(question_type, question, history, image_url=None
     return (response.choices[0].message.content, question_type)
 
 
-def process_ppt_tool(
-    question_type, question: str, history: List[List[str] | None] = None, image_url=None
-) -> Tuple[Tuple[str, str], userPurposeType]:
-    raw_text: str = generate_ppt_content(question, history)
-    try:
-        ppt_content = json.loads(raw_text)
-    except:
-        return None, userPurposeType.PPT
-    ppt_file: str = generate_ppt(
-        ppt_content
-    )  # 这个语句由于模型能力有限，可能不会按照格式输出，会导致冲突，要用str正则语句修改，删除一些异常符号，否则会出bug
-    return (ppt_file, "ppt"), userPurposeType.PPT
-
-
-def process_docx_tool(
-    question_type, question: str, history: List[List[str] | None] = None, image_url=None
-) -> Tuple[Tuple[str, str], userPurposeType]:
-    # 先生成word的文案
-    raw_text: str = generate_docx_content(question, history)
-    try:
-        docx_content = json.loads(raw_text)
-    except:
-        return None, userPurposeType.Docx
-    docx_file: str = generate_docx(docx_content)
-    return (docx_file, "docx"), userPurposeType.Docx
-
-
-def process_text_video_tool(question_type, question, history, image_url=None):
-    client = Clientfactory.get_special_client(client_type=question_type)
-    try:
-        chatRequest = client.videos.generations(
-            model=get_env_value("VIDEO_GENERATE_MODEL"),
-            prompt=question,
-        )
-        print(chatRequest)
-
-        start_time = time.time()  # 开始计时
-        video_url = None
-        timeout = 120
-        while time.time() - start_time < timeout:
-            # 请求视频生成结果
-            print(chatRequest.id)
-            response = client.videos.retrieve_videos_result(id=chatRequest.id)
-
-            # 检查任务状态是否成功
-            if response.task_status == "SUCCESS" and response.video_result:
-                video_url = response.video_result[0].url
-                print("视频URL:", video_url)
-                return ((video_url, "视频"), question_type)
-            else:
-                print("任务未完成，请等待...")
-
-            # 等待一段时间再请求
-            time.sleep(2)  # 每次请求后等待2秒再继续
-
-    except:
-        return (None, question_type)
-
-
-# 处理audio问题的函数
-def process_audio_tool(
-    question_type: userPurposeType,
-    question: str,
-    history: List[List | None] = None,
-    image_url=None,
-):
-    return (None, question_type)
-
-
 # 处理联网搜索问题的函数
 def process_InternetSearch_tool(
     question_type: userPurposeType,
@@ -246,12 +171,8 @@ QUESTION_TO_FUNCTION = {
     userPurposeType.text: process_text_tool,
     userPurposeType.RAG: RAG_tool,
     userPurposeType.ImageGeneration: process_images_tool,
-    userPurposeType.Audio: process_audio_tool,
     userPurposeType.InternetSearch: process_InternetSearch_tool,
     userPurposeType.ImageDescribe: process_image_describe_tool,
-    userPurposeType.PPT: process_ppt_tool,
-    userPurposeType.Docx: process_docx_tool,
-    userPurposeType.Video: process_text_video_tool,
     userPurposeType.KnowledgeGraph: KG_tool,
 }
 

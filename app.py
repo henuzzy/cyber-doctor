@@ -63,7 +63,6 @@ def grodio_view(chatbot, chat_input):
 
     # 处理用户上传的文件
     files = chat_input["files"]
-    audio_files_found = False
     images = []
     pdfs = []
     docxs = []
@@ -71,9 +70,7 @@ def grodio_view(chatbot, chat_input):
 
     for file in files:
         file_type, _ = mimetypes.guess_type(file)
-        if file_type and file_type.startswith("audio/"):
-            audio_files_found = True
-        elif file_type and file_type.startswith("image/"):
+        if file_type and file_type.startswith("image/"):
             images.append(file)
         elif file_type and file_type.startswith("application/pdf"):
             pdfs.append(file)
@@ -86,11 +83,6 @@ def grodio_view(chatbot, chat_input):
         else:
             user_message += "请你将下面的句子修饰后输出，不要包含额外的文字，句子:'该文件为不支持的文件类型'"
             print(f"Unknown file type: {file_type}")
-
-    if audio_files_found and not user_message and not images and not pdfs and not docxs and not texts:
-        chatbot[-1][1] = "当前版本已关闭音频识别，请改用文本输入，或上传 PDF / Word / TXT 文件。"
-        yield chatbot, empty_input
-        return
 
     # 图片文件解析
     if images != []:
@@ -167,35 +159,6 @@ def grodio_view(chatbot, chat_input):
             bot_response += answer[0][i : i + 1]  # 累加当前chunk到combined_message
             chatbot[-1][1] = bot_response  # 更新chatbot对话中的最后一条消息
             yield chatbot, empty_input  # 实时输出当前累积的对话内容
-
-    # 处理视频
-    if answer[1] == userPurposeType.Video:
-        if answer[0] is not None:
-            chatbot[-1][1] = answer[0]
-        else:
-            chatbot[-1][1] = "抱歉，视频生成失败，请稍后再试"
-        yield chatbot, empty_input
-
-    # 处理PPT
-    if answer[1] == userPurposeType.PPT:
-        if answer[0] is not None:
-            chatbot[-1][1] = answer[0]
-        else:
-            chatbot[-1][1] = "抱歉，PPT生成失败，请稍后再试"
-        yield chatbot, empty_input
-
-    # 处理Docx
-    if answer[1] == userPurposeType.Docx:
-        if answer[0] is not None:
-            chatbot[-1][1] = answer[0]
-        else:
-            chatbot[-1][1] = "抱歉，文档生成失败，请稍后再试"
-        yield chatbot, empty_input
-
-    # 处理音频生成
-    if answer[1] == userPurposeType.Audio:
-        chatbot[-1][1] = "当前版本已关闭音频功能，请使用文本模式。"
-        yield chatbot, empty_input
 
     # 处理联网搜索
     if answer[1] == userPurposeType.InternetSearch:

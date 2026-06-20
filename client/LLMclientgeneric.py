@@ -62,7 +62,7 @@ class LLMclientgeneric(LLMclientbase):
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    # 该函数用于直接输入消息进行对话，在ppt/word生成中作用
+    # 该函数用于直接输入消息进行对话
     @override
     def chat_using_messages(self, messages: List[Dict]) -> str | None:
         response = self.client.chat.completions.create(
