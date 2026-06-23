@@ -12,6 +12,7 @@ migrations/
 .idea/
 .vscode/
 flagged/
+logs/
 project/settings.py
 
 data/

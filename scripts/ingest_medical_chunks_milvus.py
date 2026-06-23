@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
@@ -59,37 +60,62 @@ def main() -> None:
     parser.add_argument("--candidate-k", type=int, default=DEFAULT_RETRIEVE_CANDIDATE_K, help="Candidates per dense/sparse route before fusion.")
     parser.add_argument("--dense-weight", type=float, default=DEFAULT_DENSE_WEIGHT)
     parser.add_argument("--sparse-weight", type=float, default=DEFAULT_SPARSE_WEIGHT)
+    parser.add_argument("--log-every", type=int, default=1, help="Print progress every N batches.")
     args = parser.parse_args()
 
+    started_at = time.perf_counter()
+    log(f"input_dir={args.input_dir}")
+    log(f"collection={args.collection}, uri={args.uri}")
+
+    log("importing pymilvus...")
     try:
         from pymilvus import MilvusClient
     except ImportError as exc:
         raise SystemExit("pymilvus is not installed. Run: python -m pip install pymilvus") from exc
 
+    log("loading chunk jsonl files...")
     chunks = load_chunks(Path(args.input_dir))
     if not chunks:
         raise SystemExit(f"No chunks found under {args.input_dir}")
+    log(f"loaded {len(chunks)} chunks")
 
     model_path = resolve_model_path(args.model)
+    log(f"resolved embedding model: {model_path}")
+    log("connecting to Milvus...")
     client = MilvusClient(uri=args.uri, token=args.token)
+    log("Milvus client ready")
+    log(f"loading BGE-M3 model on device={args.device}, fp16={args.use_fp16}...")
     model = load_embedding_model(model_path, args.use_fp16, args.device)
+    log("BGE-M3 model ready")
 
     total = len(chunks)
     processed = 0
     collection_ready = False
-    for batch in chunked(chunks, args.batch_size):
+    total_batches = (total + args.batch_size - 1) // args.batch_size
+    for batch_no, batch in enumerate(chunked(chunks, args.batch_size), start=1):
+        batch_started_at = time.perf_counter()
+        if should_log_batch(batch_no, args.log_every, total_batches):
+            log(f"batch {batch_no}/{total_batches}: embedding {len(batch)} chunks...")
         texts = [chunk["search_text"] for chunk in batch]
         dense_vectors, sparse_vectors = encode_batch(model, texts, min(args.batch_size, len(texts)), args.max_length)
         if not collection_ready:
             # Create the collection after the first embedding batch so the dense dimension is exact.
+            log("checking/creating Milvus collection...")
             ensure_collection(client, args.collection, len(dense_vectors[0]), recreate=args.recreate)
             collection_ready = True
         rows = [chunk_to_row(chunk, dense, sparse) for chunk, dense, sparse in zip(batch, dense_vectors, sparse_vectors)]
+        if should_log_batch(batch_no, args.log_every, total_batches):
+            log(f"batch {batch_no}/{total_batches}: upserting {len(rows)} rows...")
         client.upsert(collection_name=args.collection, data=rows)
         processed += len(rows)
-        print(f"upserted {processed}/{total}")
+        if should_log_batch(batch_no, args.log_every, total_batches):
+            pct = processed * 100 / total
+            elapsed = time.perf_counter() - batch_started_at
+            log(f"upserted {processed}/{total} ({pct:.1f}%), batch_sec={elapsed:.1f}")
 
+    log("flushing Milvus collection...")
     client.flush(collection_name=args.collection)
+    log(f"finished in {time.perf_counter() - started_at:.1f}s")
     print(
         json.dumps(
             {
@@ -106,6 +132,7 @@ def main() -> None:
     )
 
     if args.probe_query:
+        log(f"running probe query: {args.probe_query}")
         search_probe(
             client,
             args.collection,
@@ -117,6 +144,15 @@ def main() -> None:
             args.dense_weight,
             args.sparse_weight,
         )
+
+
+def log(message: str) -> None:
+    print(f"[ingest] {message}", flush=True)
+
+
+def should_log_batch(batch_no: int, log_every: int, total_batches: int) -> bool:
+    log_every = max(1, log_every)
+    return batch_no == 1 or batch_no == total_batches or batch_no % log_every == 0
 
 
 def load_chunks(input_dir: Path) -> list[dict]:

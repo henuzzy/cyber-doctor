@@ -219,7 +219,8 @@ with gr.Blocks() as demo:
 
 # 启动应用
 def start_gradio():
-    demo.launch(server_port=10032, share=False)
+    server_port = int(os.getenv("GRADIO_SERVER_PORT", "10032"))
+    demo.launch(server_port=server_port, share=False)
 
 
 if __name__ == "__main__":

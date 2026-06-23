@@ -2,6 +2,9 @@ httpx==0.27.2
 openai==1.51.0
 python-dotenv==1.0.1
 gradio==4.44.1
+fastapi==0.115.6
+starlette==0.41.3
+pydantic==2.9.2
 overrides==7.7.0
 zhipuai==2.1.5.20230904
 icecream==2.1.3

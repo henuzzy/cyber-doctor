@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -140,7 +141,47 @@ def load_embedding_model(model_name: str, use_fp16: bool, device_mode: str):
         raise RuntimeError("FlagEmbedding is not installed. Run: python -m pip install FlagEmbedding") from exc
     device = resolve_device(device_mode)
     fp16_enabled = bool(use_fp16 and device.startswith("cuda"))
-    return BGEM3FlagModel(model_name, use_fp16=fp16_enabled, devices=device)
+    patch_transformers_dtype_argument()
+    print(
+        "[medical_retriever] loading BGE-M3 "
+        f"python={sys.executable} model={model_name} device={device} fp16={fp16_enabled}",
+        flush=True,
+    )
+    try:
+        return BGEM3FlagModel(model_name, use_fp16=fp16_enabled, devices=device)
+    except TypeError as exc:
+        if "unexpected keyword argument 'dtype'" not in str(exc):
+            raise
+        raise RuntimeError(
+            "BGE-M3 failed to load because the active Python environment has an incompatible "
+            "FlagEmbedding/transformers combination. Start the app with the project venv "
+            r"(.\.venv\Scripts\python.exe app.py) or install requirements.txt in the active environment. "
+            f"Active python: {sys.executable}"
+        ) from exc
+
+
+def patch_transformers_dtype_argument() -> None:
+    """Allow FlagEmbedding 1.4.0 to run on transformers 4.x.
+
+    FlagEmbedding passes dtype=... into AutoModel.from_pretrained. Transformers 4.x
+    expects torch_dtype=..., so without this shim BGE-M3 fails before retrieval starts.
+    """
+    try:
+        from transformers import AutoModel
+    except Exception:
+        return
+    if getattr(AutoModel.from_pretrained, "_cyber_doctor_dtype_patch", False):
+        return
+
+    original = AutoModel.from_pretrained
+
+    def patched_from_pretrained(*args, **kwargs):
+        if "dtype" in kwargs and "torch_dtype" not in kwargs:
+            kwargs["torch_dtype"] = kwargs.pop("dtype")
+        return original(*args, **kwargs)
+
+    patched_from_pretrained._cyber_doctor_dtype_patch = True
+    AutoModel.from_pretrained = patched_from_pretrained
 
 
 def resolve_device(device_mode: str) -> str:
