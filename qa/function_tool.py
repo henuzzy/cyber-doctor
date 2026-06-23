@@ -110,6 +110,18 @@ def RAG_tool(
     return (response, question_type)
 
 
+def MNGS_judge_tool(
+    question_type: userPurposeType,
+    question: str,
+    history: List[List | None] = None,
+    image_url=None,
+):
+    from mngs.rag_judge import judge_with_rag_stream
+
+    response = judge_with_rag_stream(question, history)
+    return (response, question_type)
+
+
 # 处理ImageGeneration问题的函数
 def process_images_tool(question_type, question, history, image_url=None):
     client = Clientfactory.get_special_client(client_type=question_type)
@@ -170,6 +182,7 @@ def process_InternetSearch_tool(
 QUESTION_TO_FUNCTION = {
     userPurposeType.text: process_text_tool,
     userPurposeType.RAG: RAG_tool,
+    userPurposeType.MNGSJudge: MNGS_judge_tool,
     userPurposeType.ImageGeneration: process_images_tool,
     userPurposeType.InternetSearch: process_InternetSearch_tool,
     userPurposeType.ImageDescribe: process_image_describe_tool,

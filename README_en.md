@@ -74,8 +74,8 @@ The imbalance in healthcare resources has long been a key issue of concern in so
 - **PyTorch**
 - **Transformers**
 - **Gradio**: simple UI and interaction generation tool
-- **Langchain**: Based on the Langchain framework, build a language model for chain operations
-- **modelscope & huggingface**: download and configuration of pre-trained large models
+- **Milvus**: persistent vector database for the medical knowledge base
+- **BGE-M3 / FlagEmbedding**: dense/sparse hybrid retrieval embeddings
 - **RAG**: a technology that combines retrieval and generation to enhance the answer quality of generative models
 - **Knowledge Graph (Neo4j)**: Neo4j graph database configuration and Cypher statement operations
 - **OpenAi & zhipuai**: Related large model sdk calling methods
@@ -226,13 +226,9 @@ cyber-doctor/
 │   └── config.py                     # Configuration loading and processing module
 ├── kg/                             # Knowledge graph related function module
 │   └── Graph.py                      # Knowledge graph object implementation
-├── model/                          # Model related function modules used for retrieval, including Internet RAG, Knowledge Base RAG, Knowledge Graph RAG
+├── model/                          # Model related function modules used for retrieval
 │   ├── __init__.py                   # Package initialization file
 │   ├── model_base.py                 # Model base class definition
-│   ├── Internet/                     # Internet RAG vector store implementation
-│   │   ├── __init__.py                 # Package initialization file
-│   │   ├── Internet_model.py           # Builds Internet RAG vector store
-│   │   └── Internet_service.py         # Internet RAG vector store interface
 │   ├── KG/                           # Knowledge Graph RAG matching automaton implementation
 │   │   ├── __init__.py                 # Package initialization file
 │   │   ├── data_utils.py               # Knowledge graph data processing tools
@@ -240,7 +236,8 @@ cyber-doctor/
 │   │   └── search_service.py           # Knowledge Graph RAG matching automaton interface
 │   └── RAG/                          # Knowledge Base RAG vector store implementation
 │       ├── __init__.py                 # Package initialization file
-│       ├── retrieve_model.py           # Builds Knowledge Base RAG vector store
+│       ├── document.py                  # Lightweight document object
+│       ├── medical_retriever.py         # BGE-M3 + Milvus dense/sparse hybrid retriever
 │       └── retrieve_service.py         # Knowledge Base RAG vector store interface
 ├── qa/                             # QA system core module
 │   ├── __init__.py                   # Package initialization file

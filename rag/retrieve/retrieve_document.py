@@ -1,5 +1,5 @@
 from typing import List,Tuple
-from langchain_core.documents import Document
+from model.RAG.document import Document
 from model.RAG.retrieve_service import retrieve
 
 def format_docs(docs:List[Document]):

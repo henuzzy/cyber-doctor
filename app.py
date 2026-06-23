@@ -128,6 +128,7 @@ def grodio_view(chatbot, chat_input):
     if (
         answer[1] == userPurposeType.text
         or answer[1] == userPurposeType.RAG
+        or answer[1] == userPurposeType.MNGSJudge
         or answer[1] == userPurposeType.KnowledgeGraph
     ):
         # 流式输出

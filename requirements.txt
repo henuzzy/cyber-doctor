@@ -9,15 +9,8 @@ pymysql==1.1.1
 django==5.1.1
 APScheduler==3.10.4
 python-docx==1.1.2
-langchain==0.3.3
 markdown==3.7
-unstructured==0.15.13
-langchain-community==0.3.2
-modelscope==1.17.0
-addict==2.4.0
-datasets==2.18.0
-oss2==2.19.0
-torch==2.4.1
+torch>=2.4.1
 simplejson==3.19.3
 sortedcontainers==2.4.0
 transformers==4.45.2
@@ -25,3 +18,4 @@ pyahocorasick==2.1.0
 py2neo==2021.2.4
 PyPDF2==3.0.1
 pymilvus==2.6.12
+FlagEmbedding==1.4.0

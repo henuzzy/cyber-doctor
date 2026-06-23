@@ -16,6 +16,8 @@ project/settings.py
 
 data/
 konwledge-base/
+*.chunks.jsonl
+*.sections.jsonl
 user_data/
 config/config-local.yaml
 project_structure.txt
