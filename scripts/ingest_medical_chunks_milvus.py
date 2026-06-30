@@ -207,7 +207,32 @@ def load_embedding_model(model_name: str, use_fp16: bool, device_mode: str):
         raise SystemExit("FlagEmbedding is not installed. Run: python -m pip install FlagEmbedding") from exc
     device = resolve_device(device_mode)
     fp16_enabled = bool(use_fp16 and device.startswith("cuda"))
+    patch_transformers_dtype_argument()
     return BGEM3FlagModel(model_name, use_fp16=fp16_enabled, devices=device)
+
+
+def patch_transformers_dtype_argument() -> None:
+    """Allow FlagEmbedding 1.4.0 to run with transformers 4.x during ingestion.
+
+    FlagEmbedding passes dtype=... to AutoModel.from_pretrained, while the
+    transformers version used by this project expects torch_dtype=....
+    """
+    try:
+        from transformers import AutoModel
+    except Exception:
+        return
+    if getattr(AutoModel.from_pretrained, "_cyber_doctor_dtype_patch", False):
+        return
+
+    original = AutoModel.from_pretrained
+
+    def patched_from_pretrained(*args, **kwargs):
+        if "dtype" in kwargs and "torch_dtype" not in kwargs:
+            kwargs["torch_dtype"] = kwargs.pop("dtype")
+        return original(*args, **kwargs)
+
+    patched_from_pretrained._cyber_doctor_dtype_patch = True
+    AutoModel.from_pretrained = patched_from_pretrained
 
 
 def resolve_device(device_mode: str) -> str:
