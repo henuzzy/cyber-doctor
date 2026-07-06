@@ -198,6 +198,70 @@ Option：
      -> 写入 Milvus medical_textbooks collection
    ```
 
+## UpToDate 在线检索与 Markdown 缓存
+
+UpToDate 登录通常需要人工输入账号密码和短信验证码。为了避免每次脚本结束后浏览器关闭导致重新登录，推荐先单独启动一个常驻 Chrome，再让 Playwright 通过 CDP 连接这个浏览器。
+
+1. **启动常驻 Chrome**
+
+   在 PowerShell 中执行：
+
+   ```powershell
+   & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+     --remote-debugging-port=9222 `
+     --user-data-dir="E:\华大医疗agent资料\uptodate_cdp_chrome_profile" `
+     --new-window "https://www.uptodate.cn/contents/search"
+   ```
+
+   如果 Chrome 不在上述路径，可以先查找：
+
+   ```powershell
+   Get-Command chrome
+   ```
+
+   浏览器打开后，在该 Chrome 中手动登录 UpToDate 并完成短信验证码。只要这个 Chrome 不手动关闭，后续脚本运行结束也不会关闭浏览器，登录态可以继续复用。
+
+2. **按搜索结果顺序缓存文章 Markdown**
+
+   下面命令会搜索指定菌名，按 UpToDate 搜索页展示顺序抓取前 3 篇主文章，并将每篇文章按网页标题保存为一个 Markdown 文件。默认不生成 JSONL 日志，只生成 `.md` 缓存。
+
+   ```powershell
+   python scripts\uptodate_browser_search.py `
+     --query "Shigella dysenteriae" `
+     --cdp-url "http://127.0.0.1:9222" `
+     --cache-dir "E:\华大医疗agent资料\uptodate_cache_md" `
+     --open-details `
+     --detail-top-k 3 `
+     --detail-max-chars 500000 `
+     --max-results 10 `
+     --click-more 1 `
+     --refresh-cache
+   ```
+
+   关键参数说明：
+
+   - `--cdp-url`：连接已登录的常驻 Chrome，脚本结束不会关闭该浏览器。
+   - `--cache-dir`：Markdown 文章缓存目录。
+   - `--detail-top-k`：按搜索页展示顺序缓存前 N 篇主文章。
+   - `--detail-max-chars`：单篇文章最大缓存字符数。
+   - `--refresh-cache`：同名 Markdown 已存在时强制刷新。
+
+   如需调试搜索结果顺序，可以临时加 `--output` 输出 JSONL 日志：
+
+   ```powershell
+   python scripts\uptodate_browser_search.py `
+     --query "Shigella dysenteriae" `
+     --output "E:\华大医疗agent资料\uptodate_debug.jsonl" `
+     --cdp-url "http://127.0.0.1:9222" `
+     --cache-dir "E:\华大医疗agent资料\uptodate_cache_md" `
+     --open-details `
+     --detail-top-k 3 `
+     --detail-max-chars 500000 `
+     --max-results 10 `
+     --click-more 1 `
+     --refresh-cache
+   ```
+
 ## 医学文档清洗建议
 
 医学书籍和案例报告建议采用不同清洗策略。
