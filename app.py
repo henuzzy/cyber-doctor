@@ -11,6 +11,9 @@ import gradio as gr
 from icecream import ic
 from docx import Document
 import os
+from pathlib import Path
+from uuid import uuid4
+from reporting.mngs_report import export_latest_chat_pdf
 
 
 AVATAR = ("resource/user.png", "resource/bot.jpg")
@@ -48,7 +51,15 @@ def text_file_to_str(text_file):
 def image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-        return encoded_string
+    return encoded_string
+
+
+def export_current_chat_pdf(chatbot):
+    """Create a downloadable PDF from the latest structured mNGS answer."""
+    output_dir = Path(__file__).resolve().parent / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"mNGS_可解释性诊断报告_{uuid4().hex[:8]}.pdf"
+    return export_latest_chat_pdf(str(output_path), chatbot)
 
 
 # 核心函数
@@ -59,7 +70,7 @@ def grodio_view(chatbot, chat_input):
     user_message = chat_input["text"]
     bot_response = "loading..."
     chatbot.append([user_message, bot_response])
-    yield chatbot, empty_input
+    yield chatbot, empty_input, None
 
     # 处理用户上传的文件
     files = chat_input["files"]
@@ -97,7 +108,7 @@ def grodio_view(chatbot, chat_input):
                     <img src="data:image/png;base64,{image}" alt="Generated Image" style="max-width: 100%; height: auto; cursor: pointer;" />
                 </div>
                 """
-            yield chatbot, empty_input
+            yield chatbot, empty_input, None
     else:
         image_url = None
 
@@ -133,9 +144,21 @@ def grodio_view(chatbot, chat_input):
     ):
         # 流式输出
         for chunk in answer[0]:
-            bot_response = bot_response + (chunk.choices[0].delta.content or "")
+            if isinstance(chunk, str):
+                bot_response += chunk
+            else:
+                bot_response += chunk.choices[0].delta.content or ""
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input
+            yield chatbot, empty_input, None
+
+    if answer[1] == userPurposeType.MNGSJudge and bot_response.strip():
+        try:
+            generated_pdf = export_current_chat_pdf(chatbot)
+        except Exception as exc:
+            generated_pdf = None
+            print(f"自动生成 mNGS PDF 失败: {exc}")
+        # Keep generated reports together while Gradio serves them for download.
+        yield chatbot, empty_input, generated_pdf
 
     # 处理图片生成
     if answer[1] == userPurposeType.ImageGeneration:
@@ -152,14 +175,14 @@ def grodio_view(chatbot, chat_input):
             {describe[0]}
             """
         chatbot[-1][1] = combined_message
-        yield chatbot, empty_input
+        yield chatbot, empty_input, None
 
     # 处理图片描述
     if answer[1] == userPurposeType.ImageDescribe:
         for i in range(0, len(answer[0]), 1):
             bot_response += answer[0][i : i + 1]  # 累加当前chunk到combined_message
             chatbot[-1][1] = bot_response  # 更新chatbot对话中的最后一条消息
-            yield chatbot, empty_input  # 实时输出当前累积的对话内容
+            yield chatbot, empty_input, None  # 实时输出当前累积的对话内容
 
     # 处理联网搜索
     if answer[1] == userPurposeType.InternetSearch:
@@ -175,11 +198,11 @@ def grodio_view(chatbot, chat_input):
         for i in range(0, len(output_message)):
             bot_response = output_message[: i + 1]
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input
+            yield chatbot, empty_input, None
         for chunk in answer[0]:
             bot_response = bot_response + (chunk.choices[0].delta.content or "")
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input
+            yield chatbot, empty_input, None
 
 
 # 构建 Gradio 界面
@@ -210,17 +233,27 @@ with gr.Blocks() as demo:
                 show_label=False,
             )
 
+    export_pdf = gr.Button("重新生成 PDF", variant="secondary")
+    export_file = gr.DownloadButton(label="下载 PDF 报告", variant="primary")
+
+    export_pdf.click(
+        fn=export_current_chat_pdf,
+        inputs=[chatbot],
+        outputs=[export_file],
+    )
+
     chat_input.submit(
         fn=grodio_view,
         inputs=[chatbot, chat_input],
-        outputs=[chatbot, chat_input],
+        outputs=[chatbot, chat_input, export_file],
     )
 
 
 # 启动应用
 def start_gradio():
     server_port = int(os.getenv("GRADIO_SERVER_PORT", "10032"))
-    demo.launch(server_port=server_port, share=False)
+    server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
+    demo.launch(server_name=server_name, server_port=server_port, share=False)
 
 
 if __name__ == "__main__":

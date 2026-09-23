@@ -12,6 +12,7 @@ pymysql==1.1.1
 django==5.1.1
 APScheduler==3.10.4
 python-docx==1.1.2
+reportlab==4.4.4
 markdown==3.7
 torch>=2.4.1
 simplejson==3.19.3

@@ -1,5 +1,6 @@
 '''封装调用大模型代理的API接口的函数'''
 from typing import List, Dict
+import os
 
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai import Stream
@@ -14,6 +15,24 @@ class LLMclientgeneric(LLMclientbase):
     def __init__(self, *args, **krgs):
         super().__init__()
 
+    def _completion_options(self, *, stream: bool = False) -> dict:
+        options = {
+            "top_p": float(os.getenv("LLM_TOP_P", "0.7")),
+            "temperature": float(os.getenv("LLM_TEMPERATURE", "0.2")),
+            "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "4096")),
+            "stream": stream,
+        }
+        model = (self.model_name or "").lower()
+        if model.startswith("qwen") or os.getenv("LLM_PROVIDER", "").lower() == "qwen":
+            # vLLM/Qwen OpenAI-compatible servers accept this in extra_body.
+            # It prevents reasoning tokens from being mixed into JSON output.
+            options["extra_body"] = {
+                "chat_template_kwargs": {
+                    "enable_thinking": os.getenv("QWEN_ENABLE_THINKING", "0") == "1"
+                }
+            }
+        return options
+
     # 该函数只负责单论对话交流，不支持流式输出，无历史输入
     @override
     def chat_with_ai(self, prompt: str) -> str | None:
@@ -22,9 +41,7 @@ class LLMclientgeneric(LLMclientbase):
             messages=[
                 {"role": "user", "content": prompt},
             ],
-            top_p=0.7,
-            temperature=0.95,
-            max_tokens=1024,
+            **self._completion_options(),
         )
         return response.choices[0].message.content
 
@@ -36,10 +53,7 @@ class LLMclientgeneric(LLMclientbase):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=self.construct_message(prompt, history if history else []),
-            top_p=0.7,
-            temperature=0.95,
-            max_tokens=1024,
-            stream=True,
+            **self._completion_options(stream=True),
         )
         return response
 
@@ -68,9 +82,7 @@ class LLMclientgeneric(LLMclientbase):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            top_p=0.7,
-            temperature=0.95,
-            max_tokens=1024,
+            **self._completion_options(),
         )
 
         return response.choices[0].message.content

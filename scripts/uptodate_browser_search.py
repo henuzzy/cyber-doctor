@@ -154,6 +154,26 @@ def search_once(page: Any, url: str, query: str, max_results: int, click_more: i
     search_box.fill(query)
     submit_search(page, search_box)
     wait_for_search_settle(page, timeout_error)
+    # The search route and document title update before Vue renders the result
+    # cards.  Parsing immediately here records real matches as zero results.
+    try:
+        page.wait_for_function(
+            """query => Array.from(document.querySelectorAll('a.search-result-primary-link')).some(anchor => {
+                try {
+                    const value = new URL(anchor.href).searchParams.get('search') || '';
+                    return value.replace(/\s+/g, ' ').trim().toLowerCase() ===
+                        query.replace(/\s+/g, ' ').trim().toLowerCase();
+                } catch {
+                    return false;
+                }
+            })""",
+            arg=query,
+            timeout=2500,
+        )
+    except timeout_error:
+        # A genuinely empty search has no primary result link. Give its empty
+        # state one final render turn before collecting the page.
+        page.wait_for_timeout(500)
     click_show_more_results(page, click_more)
     results = collect_search_results(page, query=query, max_results=max_results)
     return {
@@ -260,6 +280,9 @@ def collect_search_results(page: Any, query: str, max_results: int) -> list[dict
               if (url.pathname.includes('/table-of-contents/')) return false;
               if (url.hash) return false;
               if (url.searchParams.has('sectionRank') || url.searchParams.has('anchor')) return false;
+              const searched = clean(url.searchParams.get('search')).toLowerCase();
+              const expected = clean(query).toLowerCase();
+              if (searched && expected && searched !== expected) return false;
               return url.searchParams.get('source') === 'search_result' || url.searchParams.has('display_rank') || url.searchParams.has('selectedTitle');
             } catch {
               return false;

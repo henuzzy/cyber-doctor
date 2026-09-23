@@ -34,7 +34,7 @@
   -> 识别为 mNGS 判别任务
   -> 解析病原名、属名、样本类型、临床表型、诊断、免疫状态、reads、coverage、丰度、排名
   -> 生成多条医学检索 query
-  -> 先检索 Milvus 知识库
+  -> 按病原名称匹配结构化 PubMed/UpToDate 文档
   -> 将检索证据 + 原始病例信息一起送给 LLM
   -> 输出 label、解释、证据引用和局限性
 ```
@@ -58,7 +58,57 @@ LLM 输出格式要求为严格 JSON：
 
 如果后续做评测，只需要读取 `label` 字段即可；如果用于医生辅助解读，可以展示完整解释和证据链。
 
+### 导出可解释性 PDF
+
+项目提供了对当前 mNGS 结构化回答的 PDF 导出功能。导出使用聊天记录中已经生成的 JSON，不会再次调用模型，也不会修改原始文章或判别结果。
+
+安装依赖后启动项目：
+
+```bash
+python -m pip install -r requirements.txt
+python app.py
+```
+
+在界面完成一次 mNGS 病原判别后，点击“下载 PDF 报告”即可下载报告；也可以点击“重新生成 PDF”。报告包含既有结论、患者摘要、mNGS 检出证据、临床证据匹配、致病性资料适用范围、证据局限和建议复核项。PDF 渲染器位于 `reporting/explainability_pdf.py`，项目适配器位于 `reporting/mngs_report.py`。
+
 建议知识库按来源类型组织为三个 collection：
+
+### Qwen + 本地结构化病原文档模式
+
+项目支持在 DGX 上直接运行 Gradio、Qwen 和病原文档匹配。当前 mNGS 判别路径默认按病原名称、种拉丁名、种中文名或 NameID 匹配结构化 JSON，不调用 Milvus 向量数据库。结构化文档根目录由 `STRUCTURED_KNOWLEDGE_ROOT` 配置，目录下每个病原文件夹中的 PubMed 和 UpToDate JSON 会一起提供给模型；两种来源仍按各自的字段结构处理。
+
+DGX 上的 `.env` 可配置为：
+
+```env
+LLM_BASE_URL=http://127.0.0.1:8000/v1
+LLM_API_KEY=服务要求的值
+MODEL_NAME=qwen3.8-27b
+STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/experiments/mngs-structured-first20
+GRADIO_SERVER_PORT=10032
+```
+
+Qwen 的 OpenAI 兼容 Chat Completions 接口由项目现有 OpenAI 客户端调用，`LLM_BASE_URL` 指向 Qwen 服务的 `/v1` 根地址。
+Qwen3 系列默认关闭 thinking，避免推理过程混入结构化 JSON；如需开启，可将 `QWEN_ENABLE_THINKING=1`。
+
+提交完整 mNGS 病例或可识别的病原名称后，系统先匹配结构化文章，再调用 Qwen 生成判别解释。mNGS 回答流结束后，PDF 自动生成到项目根目录的 `outputs/` 文件夹，页面中的 PDF 文件控件随即提供下载；点击下载后由浏览器决定本机最终保存位置。页面仍保留“重新生成 PDF”按钮。
+
+PDF 在服务端生成并嵌入服务端字体，不依赖用户本机安装字体。Linux/DGX 部署建议安装文泉驿微米黑：
+
+```bash
+sudo apt-get install fonts-wqy-microhei
+```
+
+也可以通过 `CYBER_DOCTOR_PDF_FONT` 指定其他可嵌入的中文 TrueType 字体。找不到可嵌入字体时，PDF 导出会明确失败并提示配置，不会静默生成字体异常的文件。
+
+本机通过 SSH 隧道访问 DGX 页面：
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\codex_qianwan_dgx `
+  -L 10032:127.0.0.1:10032 `
+  zhangyue@10.8.0.22
+```
+
+随后打开 `http://127.0.0.1:10032`。如果希望浏览器每次下载时询问保存位置，需要在本机浏览器中开启“下载前询问每个文件的保存位置”；Python/Gradio 页面不能直接控制浏览器的本机保存对话框。
 
 ```text
 pathogen_knowledge       # 病原基础信息、别名、分类、常见感染部位、致病性、定植/背景可能性
@@ -261,6 +311,53 @@ UpToDate 登录通常需要人工输入账号密码和短信验证码。为了�
      --click-more 1 `
      --refresh-cache
    ```
+
+3. **DGX 远程 Chrome 登录、保持登录态及抓取**
+
+   DGX 上的 Chrome 只监听服务器本机 `127.0.0.1:9222`，登录时通过 SSH 暂时转发到本机。Chrome 使用独立用户目录，SSH 隧道关闭后 Chrome 和登录态仍会保留。
+
+   在 DGX 启动常驻 Chrome（首次或 Chrome 未运行时）：
+
+   ```bash
+   nohup setsid /home/zhangyue/outputs/start_uptodate_chrome_9222.sh \
+     >/home/zhangyue/outputs/uptodate_chrome_9222.log 2>&1 </dev/null &
+   ```
+
+   本机建立临时转发：
+
+   ```powershell
+   ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no `
+     -N -L 19222:127.0.0.1:9222 zhangyue@10.8.0.22
+   ```
+
+   另开一个本机 PowerShell，启动已有的登录辅助界面：
+
+   ```powershell
+   cd E:\PythonProject\cyber-doctor
+   D:\python3.11\python.exe scripts\uptodate_login_helper_local.py `
+     --cdp-url http://127.0.0.1:19222 `
+     --host 127.0.0.1 `
+     --port 18088
+   ```
+
+   打开 `http://127.0.0.1:18088`，在界面中填写账号、密码、短信验证码；若出现 Cookie 弹窗，先点“接受所有 Cookie”。确认登录完成后，可以关闭本地登录辅助程序和 SSH 隧道，**不要关闭 DGX 上的 Chrome**。
+
+   DGX 的脚本运行环境固定为 `/home/zhangyue/.venvs/uptodate/bin/python`。只抓某个病原搜索结果中的第 1 篇文章（不生成 JSONL 日志）：
+
+   ```bash
+   /home/zhangyue/.venvs/uptodate/bin/python \
+     /home/zhangyue/cyber-doctor/scripts/uptodate_browser_search.py \
+     --query "Mycobacterium paragordonae" \
+     --cdp-url http://127.0.0.1:9222 \
+     --max-results 10 \
+     --open-details \
+     --detail-top-k 1 \
+     --detail-max-chars 500000 \
+     --cache-dir /home/zhangyue/outputs/uptodate_single_Mycobacterium_paragordonae \
+     --refresh-cache
+   ```
+
+   `--detail-top-k 1` 表示严格按搜索页面顺序，只打开第一篇主文章。`--cache-dir` 内只会写对应文章的 Markdown。
 
 ## 医学文档清洗建议
 

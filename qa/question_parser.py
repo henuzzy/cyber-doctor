@@ -20,6 +20,7 @@ def is_mngs_judgement_question(question: str) -> bool:
         "mNGS检出病原",
         "mNGS结果解读",
         "当前患者是否有害",
+        "NameID",
     )
     if any(marker in question for marker in direct_markers):
         return True
@@ -33,7 +34,15 @@ def is_mngs_judgement_question(question: str) -> bool:
     has_mngs = "mNGS" in question and any(marker in question for marker in mngs_markers)
     has_case = sum(1 for marker in case_markers if marker in question) >= 2
     has_structured_mngs = "mNGS" in question and sum(1 for marker in structured_markers if marker in question) >= 2
-    return has_judgement and (has_mngs or has_case or has_structured_mngs)
+    if has_judgement and (has_mngs or has_case or has_structured_mngs):
+        return True
+    if any(marker in question for marker in direct_markers):
+        return True
+    try:
+        from model.RAG.structured_retriever import find_pathogen
+        return find_pathogen(question) is not None
+    except Exception:
+        return False
 
 
 def parse_question(question: str, image_url=None) -> userPurposeType:

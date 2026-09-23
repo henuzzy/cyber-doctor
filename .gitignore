@@ -9,6 +9,8 @@ migrations/
 .conda
 .env
 .cache/
+.codex/
+.agents/
 .idea/
 .vscode/
 flagged/
@@ -22,3 +24,34 @@ konwledge-base/
 user_data/
 config/config-local.yaml
 project_structure.txt
+
+# Local runtime/debug artifacts
+_tmp_*
+tmp_*.png
+*.log
+
+# Python environments and build artifacts
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+node_modules/
+dist/
+build/
+*.egg-info/
+
+# Local knowledge corpora and generated artifacts
+/structured/
+/output/
+/outputs/
+/audio/
+/ppt_docx/
+/tmp/
+/mNGS_*.pdf
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+/uptodate_*.png
+/tmp_uptodate_*.png
