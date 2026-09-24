@@ -9,7 +9,7 @@ from PyPDF2 import PdfReader
 
 from reportlab.lib import colors
 
-from reporting import explainability_pdf as renderer
+from cyber_doctor.reporting import explainability_pdf as renderer
 
 
 class PdfRendererReadabilityTests(unittest.TestCase):

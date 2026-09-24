@@ -2,6 +2,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.nox/
+htmlcov/
+.coverage*
 
 migrations/
 !migrations/__init__.py
@@ -23,12 +26,15 @@ konwledge-base/
 *.sections.jsonl
 user_data/
 config/config-local.yaml
+src/cyber_doctor/config/config-local.yaml
 project_structure.txt
 
 # Local runtime/debug artifacts
 _tmp_*
 tmp_*.png
 *.log
+*.pid
+*.sock
 
 # Python environments and build artifacts
 .venv/

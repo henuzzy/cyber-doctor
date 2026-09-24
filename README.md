@@ -69,7 +69,7 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-在界面完成一次 mNGS 病原判别后，点击“下载 PDF 报告”即可下载报告；也可以点击“重新生成 PDF”。报告包含既有结论、患者摘要、mNGS 检出证据、临床证据匹配、致病性资料适用范围、证据局限和建议复核项。PDF 渲染器位于 `reporting/explainability_pdf.py`，项目适配器位于 `reporting/mngs_report.py`。
+在界面完成一次 mNGS 病原判别后，点击“下载 PDF 报告”即可下载报告；也可以点击“重新生成 PDF”。报告包含既有结论、患者摘要、mNGS 检出证据、临床证据匹配、致病性资料适用范围、证据局限和建议复核项。PDF 渲染器位于 `src/cyber_doctor/reporting/explainability_pdf.py`，项目适配器位于 `src/cyber_doctor/reporting/mngs_report.py`。
 
 建议知识库按来源类型组织为三个 collection：
 
@@ -83,7 +83,7 @@ DGX 上的 `.env` 可配置为：
 LLM_BASE_URL=http://127.0.0.1:8000/v1
 LLM_API_KEY=服务要求的值
 MODEL_NAME=qwen3.8-27b
-STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/experiments/mngs-structured-first20
+STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/experiments/cyber-doctor-qwen/structured
 GRADIO_SERVER_PORT=10032
 ```
 
@@ -116,7 +116,7 @@ medical_textbooks        # 医学书籍、教材、指南、专家共识
 medical_case_reports     # PDF案例报告转换后的结构化病例证据
 ```
 
-当前运行时代码默认使用 `medical_textbooks` collection，并通过 `model/RAG/medical_retriever.py` 执行 BGE-M3 dense/sparse 混合检索。旧的 `cyber_doctor_knowledge`、FAISS、ModelScope/LangChain 知识库检索链路已经移除。
+当前运行时代码默认使用 `medical_textbooks` collection，并通过 `src/cyber_doctor/model/rag/medical_retriever.py` 执行 BGE-M3 dense/sparse 混合检索。旧的 `cyber_doctor_knowledge`、FAISS、ModelScope/LangChain 知识库检索链路已经移除。
 
 ## 技术栈
 
@@ -221,22 +221,22 @@ Option：
 3. **离线嵌入医学 chunk**
 
    ```bash
-   python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
+   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
    ```
 
    如需删除旧 collection 并完全重建：
 
    ```bash
-   python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
+   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
    ```
 
    可以加一个检索探针：
 
    ```bash
-   python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
+   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
    ```
 
-   运行时只使用 `model/RAG/medical_retriever.py` 这一套 BGE-M3 混合检索器，不再有旧的 FAISS、ModelScope 或 LangChain 知识库检索入口。
+   运行时只使用 `src/cyber_doctor/model/rag/medical_retriever.py` 这一套 BGE-M3 混合检索器，不再有旧的 FAISS、ModelScope 或 LangChain 知识库检索入口。
 
 4. **当前推荐的文档流程**
 
@@ -346,7 +346,7 @@ UpToDate 登录通常需要人工输入账号密码和短信验证码。为了�
 
    ```bash
    /home/zhangyue/.venvs/uptodate/bin/python \
-     /home/zhangyue/cyber-doctor/scripts/uptodate_browser_search.py \
+     /home/zhangyue/cyber-doctor/scripts/ops/uptodate_browser_search.py \
      --query "Mycobacterium paragordonae" \
      --cdp-url http://127.0.0.1:9222 \
      --max-results 10 \
@@ -401,13 +401,13 @@ UpToDate 登录通常需要人工输入账号密码和短信验证码。为了�
 项目提供了一个规则清洗脚本，可用于处理 MinerU 转出的医学书籍 Markdown：
 
 ```bash
-python scripts/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md"
+python scripts/data/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md"
 ```
 
 也可以批量清洗整个目录：
 
 ```bash
-python scripts/clean_medical_md_book.py --input-dir "E:\华大医疗agent资料" --output-dir "E:\华大医疗agent清洗版资料"
+python scripts/data/clean_medical_md_book.py --input-dir "E:\华大医疗agent资料" --output-dir "E:\华大医疗agent清洗版资料"
 ```
 
 默认只生成清洗后的 `.md` 文件，不生成 `*.sections.jsonl`。后续 chunk 入库时会直接从 clean markdown 的标题层级中重新解析章节路径。
@@ -415,7 +415,7 @@ python scripts/clean_medical_md_book.py --input-dir "E:\华大医疗agent资料"
 如果调试时确实需要导出标题结构，可以额外指定：
 
 ```bash
-python scripts/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md" --records-output "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.sections.jsonl"
+python scripts/data/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md" --records-output "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.sections.jsonl"
 ```
 
 ### 医学书籍 Markdown 切分
@@ -423,7 +423,7 @@ python scripts/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔�
 清洗后的书籍不要直接整本入库，先切成医疗 RAG 专用 chunk：
 
 ```bash
-python scripts/chunk_medical_md.py --input-dir "E:\华大医疗agent清洗版资料" --output-dir "E:\华大医疗agent清洗版chunks" --max-chars 1200 --overlap-chars 150 --doc-type textbook
+python scripts/data/chunk_medical_md.py --input-dir "E:\华大医疗agent清洗版资料" --output-dir "E:\华大医疗agent清洗版chunks" --max-chars 1200 --overlap-chars 150 --doc-type textbook
 ```
 
 脚本会输出 `*.chunks.jsonl`，每条记录包含：
@@ -451,19 +451,19 @@ metadata        书名、章节路径、行号、block_type 等来源信息
 生成 chunk 后，用 BGE-M3 写入 Milvus。建议书籍、案例报告、病原信息分别使用不同 collection：
 
 ```bash
-python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
+python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
 ```
 
 第一次创建 collection 或需要完全重建时：
 
 ```bash
-python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
+python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
 ```
 
 可以加一个检索探针：
 
 ```bash
-python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
+python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
 ```
 
 医学检索探针默认使用 BGE-M3 混合召回：
@@ -524,6 +524,11 @@ Option：
       ```
 
 ## 项目结构
+
+当前 `src/` 布局见[项目目录说明](docs/project-layout.md)，本地开发与脚本分组见[开发说明](docs/development.md)。下面的旧版目录树已折叠，仅留作仓库历史参考。
+
+<details>
+<summary>旧版目录树（已过期）</summary>
 
 ```
 cyber-doctor/
@@ -597,6 +602,8 @@ cyber-doctor/
 └── resource/                       # 资源文件目录，存放图片等静态资源
 ```
 
+</details>
+
 ## 常见问题
 
 1. **为什么 mNGS 判别没有检索到知识库？**
@@ -604,12 +611,12 @@ cyber-doctor/
    先确认 Milvus 已启动，`.env` 中的 `MILVUS_URI`、`MEDICAL_TEXTBOOK_COLLECTION`、`BGE_M3_MODEL` 正确，并且已经运行过：
 
    ```bash
-   python scripts/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
+   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
    ```
 
 2. **为什么运行时没有再从原始 PDF/Markdown 自动嵌入？**
 
-   当前设计是离线入库、在线只检索。原始文档需要先清洗、chunk，再通过 `scripts/ingest_medical_chunks_milvus.py` 写入 Milvus。用户提问时不会临时解析和嵌入文档。
+   当前设计是离线入库、在线只检索。原始文档需要先清洗、chunk，再通过 `scripts/data/ingest_medical_chunks_milvus.py` 写入 Milvus。用户提问时不会临时解析和嵌入文档。
 
 3. **mNGS 判别为什么输出 JSON，而不是只输出“有害/无害”？**
 
