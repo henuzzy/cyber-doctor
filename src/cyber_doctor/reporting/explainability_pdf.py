@@ -70,29 +70,32 @@ def _register_ttf(name: str, candidates: Sequence[str], *, subfont_index: int = 
 
 def _register_fonts() -> tuple[str, str]:
     global _PDF_REGULAR_FONT
-    project_fonts = [
-        Path(__file__).resolve().parents[3] / "fonts" / "wqy-microhei.ttc",
-    ]
+    # Use Ubuntu-packaged TrueType CJK fonts so deployment needs no bundled
+    # Windows font files or machine-specific font paths. Noto CJK is CFF on
+    # this image and cannot be embedded by ReportLab; WQY is preferred when
+    # installed, with the Ubuntu Arphic TrueType font as a stable fallback.
     regular_candidates = [
-        os.getenv("CYBER_DOCTOR_PDF_FONT", ""),
-        *(str(path) for path in project_fonts),
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        r"C:\Windows\Fonts\msyh.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
     ]
     bold_candidates = [
-        os.getenv("CYBER_DOCTOR_PDF_BOLD_FONT", ""),
-        r"C:\Windows\Fonts\msyhbd.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
     ]
-    regular = "CyberDoctorPDFRegular" if "CyberDoctorPDFRegular" in pdfmetrics.getRegisteredFontNames() else _register_ttf("CyberDoctorPDFRegular", regular_candidates)
-    bold = "CyberDoctorPDFBold" if "CyberDoctorPDFBold" in pdfmetrics.getRegisteredFontNames() else _register_ttf("CyberDoctorPDFBold", bold_candidates)
+    regular = (
+        "CyberDoctorPDFRegular"
+        if "CyberDoctorPDFRegular" in pdfmetrics.getRegisteredFontNames()
+        else _register_ttf("CyberDoctorPDFRegular", regular_candidates, subfont_index=0)
+    )
+    bold = (
+        "CyberDoctorPDFBold"
+        if "CyberDoctorPDFBold" in pdfmetrics.getRegisteredFontNames()
+        else _register_ttf("CyberDoctorPDFBold", bold_candidates, subfont_index=0)
+    )
     if not regular:
         raise RuntimeError(
             "No embeddable CJK TrueType font found for PDF generation. "
-            "Install Droid Sans Fallback or set CYBER_DOCTOR_PDF_FONT."
+            "Install fonts-arphic-uming or fonts-wqy-microhei."
         )
     if not bold:
         bold = regular
