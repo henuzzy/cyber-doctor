@@ -1,5 +1,4 @@
 import base64
-import html
 from cyber_doctor.env import get_app_root
 from cyber_doctor.qa.answer import get_answer
 from cyber_doctor.qa.question_parser import parse_question
@@ -28,6 +27,15 @@ from cyber_doctor.mngs.session import (
     reopen_report_session,
     select_report_session,
     update_report_session,
+)
+from cyber_doctor.ui.workbench import (
+    HEADER,
+    format_session_time,
+    render_history,
+    render_overview,
+    render_processing_report,
+    render_report,
+    render_session_note,
 )
 
 
@@ -95,31 +103,28 @@ def export_review_report(report_state):
 
 
 def render_report_state(report_state):
+    return render_report(report_state)
+
+
+def refresh_workspace_ui(report_state):
+    """Refresh display and available actions after a report operation completes."""
     session = active_report_session(report_state)
-    if not session or not session.get("cases"):
-        return "尚无可审阅的 mNGS 报告。"
-    version = int(session.get("version") or 1)
-    status_label = "医生已确认" if session.get("status") == "confirmed" else "待医生审阅"
-    sections = [f"### {html.escape(str(session.get('title') or 'mNGS报告'))} · 第 {version} 版 · {status_label}"]
-    for index, case in enumerate(session["cases"], 1):
-        name = html.escape(str(case.get("Chinese") or case.get("Latin") or f"病例 {index}"))
-        sections.append(
-            f"#### {index}. {name}｜既有判定：**{html.escape(str(case.get('label', '未提供')))}**\n\n"
-            f"**置信度：** {html.escape(str(case.get('confidence', '未提供')))}\n\n"
-            f"**解释：** {html.escape(str(case.get('explanation', '未提供')))}\n\n"
-            f"**临床匹配：** {html.escape(str(case.get('clinical_match', '未提供')))}\n\n"
-            f"**证据局限：** {html.escape(str(case.get('limitations', [])))}\n\n"
-            f"**建议复核：** {html.escape(str(case.get('review_items', [])))}"
-        )
-        if case.get("doctor_feedback"):
-            sections.append("**已纳入的医生意见：**\n\n" + "\n".join(f"- {html.escape(str(item))}" for item in case["doctor_feedback"]))
-    versions = session.get("versions", [])
-    if versions:
-        sections.append("### 版本历史\n\n" + "\n".join(
-            f"- 第 {item.get('version')} 版 · {html.escape(str(item.get('summary', '报告快照')))} · {item.get('status', 'in_review')}"
-            for item in versions
-        ))
-    return "\n\n".join(sections)
+    ready = bool(session and session.get("cases"))
+    confirmed = ready and session.get("status") == "confirmed"
+    return (
+        render_overview(report_state),
+        render_session_note(report_state),
+        render_history(report_state),
+        gr.update(interactive=ready and not confirmed),
+        gr.update(interactive=ready and not confirmed),
+        gr.update(interactive=confirmed),
+        gr.update(interactive=ready),
+        gr.update(interactive=ready),
+        gr.update(interactive=ready and not confirmed),
+        gr.update(interactive=ready and not confirmed),
+        gr.update(interactive=ready and not confirmed),
+        gr.update(interactive=ready and not confirmed),
+    )
 
 
 def report_scope_choices(report_state):
@@ -137,7 +142,7 @@ def report_session_choices(report_state):
     sessions = (report_state or {}).get("sessions", [])
     choices = [
         (
-            f"{item.get('title') or 'mNGS报告'} · {str(item.get('created_at') or '')[:16].replace('T', ' ')} · {item.get('session_id', '')[:6]}",
+            f"{item.get('title') or 'mNGS报告'} · {format_session_time(item.get('created_at'))} · {item.get('session_id', '')[:6]}",
             item.get("session_id"),
         )
         for item in sessions
@@ -198,7 +203,7 @@ def reopen_report_review(report_state):
     if not session or not session.get("cases"):
         raise ValueError("当前没有可重新打开的报告")
     state = update_report_session(report_state, reopen_report_session(session))
-    return state, render_report_state(state)
+    return state, render_report_state(state), export_review_report(state)
 
 
 # 核心函数
@@ -207,14 +212,17 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
     report_state = previous_report_state or create_report_workspace()
 
     # 用户消息立即显示
-    user_message = chat_input["text"]
-    bot_response = "loading..."
+    chat_input = chat_input or {"text": "", "files": []}
+    user_message = chat_input.get("text") or ""
+    files = chat_input.get("files") or []
+    if not user_message.strip() and not files:
+        raise gr.Error("请先输入病例资料或上传文件。")
+    bot_response = "正在读取病例资料…"
     chatbot = chatbot or []
     chatbot.append([user_message, bot_response])
-    yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+    yield chatbot, empty_input, None, report_state, render_processing_report(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
 
     # 处理用户上传的文件
-    files = chat_input["files"]
     images = []
     pdfs = []
     docxs = []
@@ -253,9 +261,6 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
     else:
         image_url = None
 
-    question_type = parse_question(user_message, image_url)
-    ic(question_type)
-
     if pdfs != []:
         for i, pdf in enumerate(pdfs):
             pdf_text = pdf_to_str(pdf)
@@ -273,6 +278,9 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
 
     if user_message == "":
         user_message = "请你将下面的句子修饰后输出，不要包含额外的文字，句子:'请问您有什么想了解的，我将尽力为您服务'"
+    # Route after extracting attachments so file-only mNGS input reaches the report workflow.
+    question_type = parse_question(user_message, image_url)
+    ic(question_type)
     answer = get_answer(user_message, chatbot, question_type, image_url)
     bot_response = ""
 
@@ -290,7 +298,12 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
             else:
                 bot_response += chunk.choices[0].delta.content or ""
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+            progress_lines = [line for line in bot_response.splitlines() if line.startswith("已识别 ") or (line.startswith("[") and "篇结构化文章" in line)]
+            preview = (
+                render_processing_report(report_state, progress_lines[-1] if progress_lines else "正在分析病例与文献证据。")
+                if answer[1] == userPurposeType.MNGSJudge else render_report_state(report_state)
+            )
+            yield chatbot, empty_input, None, report_state, preview, report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
 
     if answer[1] == userPurposeType.MNGSJudge and bot_response.strip():
         try:
@@ -380,99 +393,167 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
 
 
 # 构建 Gradio 界面
-with gr.Blocks() as demo:
+workbench_theme = gr.themes.Base(
+    primary_hue="teal",
+    secondary_hue="slate",
+    neutral_hue="slate",
+    font=["Segoe UI", "Microsoft YaHei", "sans-serif"],
+).set(
+    body_background_fill="#f3f6f8",
+    body_background_fill_dark="#101d27",
+    body_text_color="#1a3244",
+    body_text_color_dark="#e1edf1",
+    block_background_fill="#ffffff",
+    block_background_fill_dark="#172934",
+    block_border_color="#dce5eb",
+    block_border_color_dark="#304855",
+    block_radius="12px",
+    button_primary_background_fill="#087f8c",
+    button_primary_background_fill_hover="#076a76",
+    button_primary_background_fill_dark="#087f8c",
+    button_primary_background_fill_hover_dark="#076a76",
+    button_primary_text_color="#ffffff",
+    button_primary_text_color_dark="#ffffff",
+    input_background_fill="#f6f9fa",
+    input_background_fill_dark="#1c303d",
+)
+with gr.Blocks(
+    title="Cyber Doctor · mNGS 审阅工作台",
+    theme=workbench_theme,
+    css=(RESOURCE_DIR / "workbench.css").read_text(encoding="utf-8"),
+) as demo:
     report_state = gr.State(None)
-    # 创建聊天布局
-    with gr.Row():
-        with gr.Column(scale=10):
-            chatbot = gr.Chatbot(
-                height=600,
-                avatar_images=AVATAR,
-                show_copy_button=True,
-                show_label=False,
-                latex_delimiters=[
-                    {"left": "\\(", "right": "\\)", "display": True},
-                    {"left": "\\[", "right": "\\]", "display": True},
-                    {"left": "$$", "right": "$$", "display": True},
-                    {"left": "$", "right": "$", "display": True},
-                ],
-                placeholder="\n## 欢迎与我对话",
-            )
+    gr.HTML(HEADER, elem_id="brandbar")
+    overview = gr.HTML(render_overview(None), elem_id="overview")
 
-    with gr.Row():
-        with gr.Column(scale=9):
+    with gr.Row(elem_id="workspace"):
+        with gr.Column(scale=2, min_width=215, elem_id="case-sidebar"):
+            gr.HTML(
+                '<div class="panel-title"><span class="eyebrow">CASE WORKSPACE</span>'
+                '<h2>病例工作区</h2><p>选择已有报告，或提交新的病例资料。</p></div>',
+                elem_classes="plain-html",
+            )
+            report_session_picker = gr.Dropdown(
+                choices=[], value=None, label="病例 / 报告会话",
+                info="不同输入分别保存为独立报告会话。",
+            )
+            session_note = gr.HTML(render_session_note(None), elem_id="session-note")
+            gr.HTML(
+                '<div class="panel-title"><h2>病例输入</h2>'
+                '<p>粘贴 mNGS 判定结果，或上传病例文件。</p></div>',
+                elem_classes="plain-html",
+            )
             chat_input = gr.MultimodalTextbox(
-                interactive=True,
-                file_count="multiple",
-                placeholder="输入消息或上传文件...",
-                show_label=False,
+                interactive=True, file_count="multiple", lines=6, max_lines=12,
+                placeholder="输入病例、病原信息和已有判定…",
+                label="病例资料", show_label=False, submit_btn=False,
+                elem_id="case-input",
+            )
+            generate_button = gr.Button("开始分析", variant="primary")
+            gr.HTML(
+                '<p class="small-note">可上传 Markdown、TXT、PDF 或 Word 文件。'
+                '一份输入可包含多个病原；分析后逐例生成解释。</p>',
+                elem_classes="plain-html",
             )
 
-    export_pdf = gr.Button("重新生成 PDF", variant="secondary")
-    export_file = gr.DownloadButton(label="下载 PDF 报告", variant="primary")
+        with gr.Column(scale=6, min_width=320, elem_id="report-column"):
+            with gr.Tabs(elem_id="report-tabs"):
+                with gr.Tab("可解释性报告", id="report"):
+                    report_preview = gr.HTML(render_report_state(None), elem_id="report-preview")
+                with gr.Tab("病例对话", id="conversation"):
+                    chatbot = gr.Chatbot(
+                        height=600, avatar_images=AVATAR, show_copy_button=True,
+                        show_label=False, elem_id="case-chat",
+                        latex_delimiters=[
+                            {"left": "\\(", "right": "\\)", "display": True},
+                            {"left": "\\[", "right": "\\]", "display": True},
+                            {"left": "$$", "right": "$$", "display": True},
+                            {"left": "$", "right": "$", "display": True},
+                        ],
+                        placeholder="## 病例对话\n\n提交病例后，可在这里查看输入与模型的原始回答。",
+                    )
+                with gr.Tab("审阅记录", id="history"):
+                    review_history = gr.HTML(render_history(None), elem_id="review-history")
 
-    with gr.Accordion("医生审阅与报告修订", open=True):
-        report_session_picker = gr.Dropdown(
-            choices=[],
-            value=None,
-            label="病例 / 报告会话",
-            info="连续分析的不同病例会保存在当前浏览器会话中，可在此切换。",
-        )
-        report_preview = gr.Markdown("尚无可审阅的 mNGS 报告。")
-        review_scope = gr.Dropdown(
-            choices=[("全部病例", "全部病例")],
-            value="全部病例",
-            label="审阅范围",
-        )
-        with gr.Row():
+        with gr.Column(scale=3, min_width=270, elem_id="doctor-panel"):
+            gr.HTML(
+                '<div class="panel-title"><span class="eyebrow">CLINICIAN REVIEW</span>'
+                '<h2>医生审阅</h2><p>定位需要调整的内容，让意见进入下一版报告。</p></div>',
+                elem_classes="plain-html",
+            )
+            review_scope = gr.Dropdown(
+                choices=[("全部病例", "全部病例")], value="全部病例",
+                label="审阅范围", interactive=False,
+            )
             feedback_type = gr.Dropdown(
                 choices=["补充事实", "纠正事实", "质疑证据", "解释问题", "要求改写"],
-                value="解释问题",
-                label="意见类型",
+                value="解释问题", label="意见类型", interactive=False,
             )
             target_section = gr.Dropdown(
                 choices=["整体", "病例摘要", "mNGS 检出证据", "临床匹配", "知识库证据", "证据局限", "建议复核项"],
-                value="整体",
-                label="关联章节",
+                value="整体", label="关联章节", interactive=False,
             )
-        doctor_feedback = gr.Textbox(
-            label="医生审阅意见",
-            placeholder="写明需要补充或纠正的事实、对证据的疑问，或希望报告进一步解释的内容。补充病例事实时请注明来源。",
-            lines=5,
-        )
-        with gr.Row():
-            revise_button = gr.Button("根据意见生成修订版", variant="primary")
-            confirm_button = gr.Button("确认当前报告", variant="secondary")
-            reopen_button = gr.Button("重新打开审阅", variant="secondary")
+            doctor_feedback = gr.Textbox(
+                label="医生审阅意见",
+                placeholder="例如：请说明该检出结果与临床表现的关联，并列出仍需核对的证据。补充事实时请注明来源。",
+                lines=5, interactive=False, elem_id="feedback-input",
+            )
+            revise_button = gr.Button("根据意见生成修订版", variant="primary", interactive=False)
+            with gr.Row(elem_id="confirm-actions"):
+                confirm_button = gr.Button("确认当前报告", variant="secondary", interactive=False)
+                reopen_button = gr.Button("重新打开审阅", variant="secondary", interactive=False)
+            with gr.Column(elem_id="export-actions"):
+                export_file = gr.DownloadButton(label="下载 PDF 报告", variant="primary", interactive=False)
+                export_pdf = gr.Button("重新生成 PDF", variant="secondary", interactive=False)
+            gr.HTML(
+                '<p class="small-note">修订保留既有判定标签。确认后，可重新打开审阅继续完善。</p>',
+                elem_classes="plain-html",
+            )
 
-    chat_input.submit(
-        fn=grodio_view,
-        inputs=[chatbot, chat_input, report_state],
-        outputs=[chatbot, chat_input, export_file, report_state, report_preview, review_scope, report_session_picker, doctor_feedback],
+    gr.HTML(
+        '<div id="workspace-footer">报告会话保存在当前浏览器会话中，服务重启或会话过期后不能恢复。'
+        '<br>报告用于辅助临床复核，不替代医生的诊断与治疗决定。</div>',
+        elem_classes="plain-html",
     )
+    refresh_outputs = [
+        overview, session_note, review_history, revise_button, confirm_button,
+        reopen_button, export_pdf, export_file, doctor_feedback, feedback_type,
+        target_section, review_scope,
+    ]
+    generation_outputs = [
+        chatbot, chat_input, export_file, report_state, report_preview,
+        review_scope, report_session_picker, doctor_feedback,
+    ]
+    # All report-changing events share one queue so the selected session stays coherent.
+    report_events = {"concurrency_id": "report-workspace", "concurrency_limit": 1}
+    for trigger in (chat_input.submit, generate_button.click):
+        trigger(
+            fn=grodio_view, inputs=[chatbot, chat_input, report_state],
+            outputs=generation_outputs, **report_events,
+        ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
 
     report_session_picker.input(
         fn=change_report_session,
         inputs=[report_session_picker, report_state],
         outputs=[report_state, report_preview, export_file, review_scope, doctor_feedback],
-    )
+        **report_events,
+    ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
 
-    export_pdf.click(fn=export_review_report, inputs=[report_state], outputs=[export_file])
+    export_pdf.click(fn=export_review_report, inputs=[report_state], outputs=[export_file], **report_events)
     revise_button.click(
         fn=review_report,
         inputs=[doctor_feedback, feedback_type, target_section, review_scope, report_state],
         outputs=[report_state, report_preview, export_file, doctor_feedback],
-    )
+        **report_events,
+    ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
     confirm_button.click(
-        fn=confirm_current_report,
-        inputs=[report_state],
-        outputs=[report_state, report_preview, export_file],
-    )
+        fn=confirm_current_report, inputs=[report_state],
+        outputs=[report_state, report_preview, export_file], **report_events,
+    ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
     reopen_button.click(
-        fn=reopen_report_review,
-        inputs=[report_state],
-        outputs=[report_state, report_preview],
-    )
+        fn=reopen_report_review, inputs=[report_state],
+        outputs=[report_state, report_preview, export_file], **report_events,
+    ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
 
 
 # 启动应用
