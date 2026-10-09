@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
+import random
 import re
 import sys
 import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -22,10 +25,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", required=True, help="Pathogen JSONL file.")
     parser.add_argument("--output-dir", required=True, help="Batch output directory.")
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
-    parser.add_argument("--limit", type=int, default=100)
-    parser.add_argument("--pause-seconds", type=float, default=2.0)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Maximum records to load; 0 loads the complete input file.",
+    )
+    parser.add_argument("--daily-limit", type=int, default=100)
+    parser.add_argument("--min-pause-seconds", type=float, default=300.0)
+    parser.add_argument("--max-pause-seconds", type=float, default=600.0)
     parser.add_argument("--detail-max-chars", type=int, default=500000)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--skip-nameid",
+        action="append",
+        default=[],
+        help="NameID already crawled outside this batch; seed it as completed.",
+    )
     return parser.parse_args()
 
 
@@ -40,6 +56,14 @@ def query_candidates(record: dict[str, Any]) -> list[dict[str, str]]:
         ("species_chinese", "种-中文名"),
         ("genus_latin", "属-拉丁名"),
         ("genus_chinese", "属-中文名"),
+        ("family_latin", "科-拉丁名"),
+        ("family_chinese", "科-中文名"),
+        ("order_latin", "目-拉丁名"),
+        ("order_chinese", "目-中文名"),
+        ("class_latin", "纲-拉丁名"),
+        ("class_chinese", "纲-中文名"),
+        ("phylum_latin", "门-拉丁名"),
+        ("phylum_chinese", "门-中文名"),
     )
     candidates: list[dict[str, str]] = []
     for key, field in fields:
@@ -47,8 +71,10 @@ def query_candidates(record: dict[str, Any]) -> list[dict[str, str]]:
         if not raw:
             continue
         variants = [raw]
-        if "_" in raw:
-            variants.append(raw.replace("_", " ").strip())
+        if key.endswith("_latin"):
+            variants.extend(
+                [raw.replace("_", " ").strip(), raw.replace(" ", "_").strip()]
+            )
         seen_variants: set[str] = set()
         for query in variants:
             if not query or query in seen_variants:
@@ -110,19 +136,42 @@ def write_summary(summary_path: Path, selected: list[dict[str, Any]], completed:
     summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def trim_article_text(text: str) -> str:
-    lines = text.replace("\r\n", "\n").split("\n")
-    kept: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped in {"参考文献", "REFERENCES", "References"}:
-            break
-        if stripped.startswith("使用 UpToDate 必须遵守订阅与许可证协议"):
-            continue
-        if re.fullmatch(r"专题\s*\d+\s*版本.*", stripped):
-            continue
-        kept.append(line)
-    return "\n".join(kept).strip()
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+
+def beijing_now() -> datetime:
+    return datetime.now(BEIJING)
+
+
+def attempted_count_for_date(completed: dict[str, dict[str, Any]], day: str) -> int:
+    return sum(
+        1
+        for item in completed.values()
+        if str(item.get("attempted_at_beijing") or "").startswith(day)
+    )
+
+
+def seconds_until_next_allowed_window(now: datetime) -> float:
+    if now.hour >= 8:
+        next_day = now.date() + timedelta(days=1)
+        target = datetime.combine(next_day, datetime.min.time(), tzinfo=BEIJING).replace(
+            hour=8
+        )
+    else:
+        target = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    return max(0.0, (target - now).total_seconds())
+
+
+def wait_for_allowed_window(log_handle: Any) -> None:
+    now = beijing_now()
+    if now.hour >= 8:
+        return
+    delay = seconds_until_next_allowed_window(now)
+    log_handle.write(
+        f"{now.isoformat()}\twait_window\t{delay:.0f}\n"
+    )
+    log_handle.flush()
+    time.sleep(delay)
 
 
 def write_result(results_handle: Any, record: dict[str, Any]) -> None:
@@ -220,20 +269,23 @@ def process_one(
             query=str(found["candidate"]["query"]),
             max_chars=detail_max_chars,
         )
-        article_text = trim_article_text(str(detail.get("article_text") or ""))
+        # Keep the extractor output verbatim.  In particular, references must
+        # remain available for downstream citation lookup.
+        article_text = str(detail.get("article_text") or "").replace("\r\n", "\n").strip()
         if not article_text:
             result["status"] = "detail_empty"
             return result
         article_dir = output_dir / "articles" / f"{index:04d}_{safe_path_component(name_id)}"
         article_dir.mkdir(parents=True, exist_ok=True)
         title = utd.clean_article_title(str(detail.get("page_title") or article.get("title") or ""))
-        article_path = article_dir / f"{utd.safe_filename(title or 'uptodate_article')}.md"
+        article_path = article_dir / f"{utd.safe_filename(title or 'uptodate_article')}_raw.md"
         article_path.write_text(article_text + "\n", encoding="utf-8", newline="\n")
         result["status"] = "success"
         result["first_article"].update(
             {
                 "page_title": title,
                 "markdown_path": str(article_path),
+                "raw_markdown_path": str(article_path),
                 "extracted_chars": len(article_text),
             }
         )
@@ -260,6 +312,33 @@ def main() -> None:
         results_path.unlink()
     write_summary(summary_path, selected, completed)
 
+    # The first pathogen was already crawled in the single-item verification.
+    # Seed it as completed so it is skipped and counted against today's quota.
+    if args.skip_nameid:
+        selected_by_id = {
+            str(record.get("NameID") or ""): record for record in selected
+        }
+        seed_time = beijing_now().isoformat()
+        for name_id in args.skip_nameid:
+            if name_id in completed:
+                continue
+            record = selected_by_id.get(name_id, {})
+            seed = {
+                "index": next(
+                    (i for i, item in enumerate(selected, start=1)
+                     if str(item.get("NameID") or "") == name_id),
+                    0,
+                ),
+                "NameID": name_id,
+                "category": str(record.get("类别") or ""),
+                "names": record.get("Name") or {},
+                "status": "already_crawled",
+                "attempted_at_beijing": seed_time,
+                "note": "Completed by the single-pathogen verification run.",
+            }
+            completed[name_id] = seed
+        write_summary(summary_path, selected, completed)
+
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(args.cdp_url)
         context = browser.contexts[0]
@@ -274,18 +353,46 @@ def main() -> None:
                 name_id = str(record.get("NameID") or "")
                 if name_id in completed:
                     continue
+                wait_for_allowed_window(log_handle)
+                while True:
+                    today = beijing_now().date().isoformat()
+                    used_today = attempted_count_for_date(completed, today)
+                    if used_today < args.daily_limit:
+                        break
+                    delay = seconds_until_next_allowed_window(beijing_now())
+                    now = beijing_now()
+                    log_handle.write(
+                        f"{now.isoformat()}\tdaily_limit\t{delay:.0f}\n"
+                    )
+                    log_handle.flush()
+                    time.sleep(delay)
+                    wait_for_allowed_window(log_handle)
                 name = record.get("Name") or {}
                 label = str(name.get("种-拉丁名") or name.get("种-中文名") or name.get("属-拉丁名") or name_id)
                 print(f"[uptodate-batch] {index}/{len(selected)} {label}", flush=True)
                 item = process_one(page, context, record, index, output_dir, args.detail_max_chars)
+                item["attempted_at_beijing"] = beijing_now().isoformat()
                 completed[name_id] = item
                 write_result(handle, item)
                 write_summary(summary_path, selected, completed)
                 log_handle.write(f"{index}\t{name_id}\t{item['status']}\n")
                 log_handle.flush()
-                if args.pause_seconds > 0 and index < len(selected):
-                    page.wait_for_timeout(args.pause_seconds * 1000)
-        browser.close()
+                remaining = any(
+                    str(item.get("NameID") or "") not in completed
+                    for item in selected[index:]
+                )
+                if remaining:
+                    delay = random.SystemRandom().uniform(
+                        args.min_pause_seconds, args.max_pause_seconds
+                    )
+                    log_handle.write(
+                        f"{beijing_now().isoformat()}\tpause\t{delay:.0f}\n"
+                    )
+                    log_handle.flush()
+                    time.sleep(delay)
+        # The browser is an existing DGX Chrome session connected over CDP.
+        # Do not call browser.close(): that would terminate the user's logged-in
+        # Chrome and force a new UpToDate login on the next run.
 
     write_summary(summary_path, selected, completed)
     print(json.dumps(json.loads(summary_path.read_text(encoding="utf-8")), ensure_ascii=False), flush=True)
