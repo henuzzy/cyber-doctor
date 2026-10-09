@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -423,6 +424,15 @@ def load_pathogen_catalog() -> dict[str, dict]:
 
 def retrieve_mngs_evidence(case: MNGSCase) -> EvidenceBundle:
     queries = build_mngs_queries(case)
+    if os.getenv("MNGS_KNOWLEDGE_SOURCE", "structured").lower() == "graphml":
+        try:
+            from cyber_doctor.model.rag.graphml_retriever import retrieve
+            names = [case.species_latin, case.species_latin.replace("_", " ") if case.species_latin else "", case.species_chinese, case.genus_latin, case.genus_chinese]
+            docs = retrieve(_unique(names), top_k=8)
+        except Exception as exc:
+            print(f"graphml pathogen retrieval failed: {exc}")
+            docs = []
+        return EvidenceBundle(queries=queries, docs=docs, context=format_evidence_docs(docs))
     try:
         from cyber_doctor.model.rag.structured_retriever import retrieve
     except Exception as exc:
