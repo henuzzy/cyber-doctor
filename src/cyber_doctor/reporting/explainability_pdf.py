@@ -270,6 +270,10 @@ def build_explainability_pdf(
         story.extend(_bullets(_list(case.get("limitations")), styles))
         story.extend([Paragraph("建议复核项", styles["label"]), Spacer(1, 2 * mm)])
         story.extend(_bullets(_list(case.get("review_items")), styles))
+        if case.get("doctor_feedback"):
+            story.extend([Paragraph("医生审阅意见", styles["label"]), Spacer(1, 2 * mm)])
+            story.extend(_bullets(_list(case.get("doctor_feedback")), styles))
+            story.extend([Paragraph(f"报告版本：第{_escape(case.get('report_version') or 1)}版", styles["small"]), Spacer(1, 2 * mm)])
         if index < len(cases):
             story.append(PageBreak())
     doc.build(story)

@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 from uuid import uuid4
 from cyber_doctor.reporting.mngs_report import export_latest_chat_pdf
+from cyber_doctor.reporting.mngs_report import export_report_pdf, _parse_json_response, _judgement_items
+from cyber_doctor.mngs.rag_judge import parse_mngs_cases, revise_judgements_with_doctor_feedback
 
 
 RESOURCE_DIR = Path(__file__).resolve().parent / "resources"
@@ -64,15 +66,54 @@ def export_current_chat_pdf(chatbot):
     return export_latest_chat_pdf(str(output_path), chatbot)
 
 
+def export_review_report(report_state):
+    if not report_state or not report_state.get("cases"):
+        raise ValueError("当前没有可导出的 mNGS 报告")
+    output_dir = Path(get_app_root()) / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    version = int(report_state.get("version") or 1)
+    output_path = output_dir / f"mNGS_可解释性诊断报告_v{version}_{uuid4().hex[:8]}.pdf"
+    return export_report_pdf(str(output_path), report_state["cases"], version=version)
+
+
+def render_report_state(report_state):
+    if not report_state or not report_state.get("cases"):
+        return "尚无可审阅的 mNGS 报告。"
+    version = int(report_state.get("version") or 1)
+    sections = [f"### 当前报告：第 {version} 版"]
+    for index, case in enumerate(report_state["cases"], 1):
+        name = case.get("Chinese") or case.get("Latin") or f"病例 {index}"
+        sections.append(
+            f"#### {index}. {name}｜既有判定：**{case.get('label', '未提供')}**\n\n"
+            f"**置信度：** {case.get('confidence', '未提供')}\n\n"
+            f"**解释：** {case.get('explanation', '未提供')}\n\n"
+            f"**临床匹配：** {case.get('clinical_match', '未提供')}\n\n"
+            f"**证据局限：** {case.get('limitations', [])}\n\n"
+            f"**建议复核：** {case.get('review_items', [])}"
+        )
+        if case.get("doctor_feedback"):
+            sections.append("**已纳入的医生意见：**\n\n" + "\n".join(f"- {item}" for item in case["doctor_feedback"]))
+    return "\n\n".join(sections)
+
+
+def review_report(feedback, report_state):
+    if not report_state or not report_state.get("cases"):
+        raise ValueError("请先完成一次 mNGS 判别")
+    revised_cases = revise_judgements_with_doctor_feedback(report_state["cases"], feedback)
+    state = {**report_state, "cases": revised_cases, "version": int(report_state.get("version") or 1) + 1}
+    return state, render_report_state(state), export_review_report(state), ""
+
+
 # 核心函数
-def grodio_view(chatbot, chat_input):
+def grodio_view(chatbot, chat_input, previous_report_state=None):
     empty_input = {"text": "", "files": []}
+    report_state = previous_report_state
 
     # 用户消息立即显示
     user_message = chat_input["text"]
     bot_response = "loading..."
     chatbot.append([user_message, bot_response])
-    yield chatbot, empty_input, None
+    yield chatbot, empty_input, None, report_state, render_report_state(report_state)
 
     # 处理用户上传的文件
     files = chat_input["files"]
@@ -136,6 +177,7 @@ def grodio_view(chatbot, chat_input):
         user_message = "请你将下面的句子修饰后输出，不要包含额外的文字，句子:'请问您有什么想了解的，我将尽力为您服务'"
     answer = get_answer(user_message, chatbot, question_type, image_url)
     bot_response = ""
+    report_state = None
 
     # 处理文本生成/其他/文档检索/知识图谱检索
     if (
@@ -155,12 +197,31 @@ def grodio_view(chatbot, chat_input):
 
     if answer[1] == userPurposeType.MNGSJudge and bot_response.strip():
         try:
-            generated_pdf = export_current_chat_pdf(chatbot)
+            payload = _parse_json_response(bot_response)
+            judged_cases = _judgement_items(payload)
+            parsed_cases = parse_mngs_cases(user_message)
+            if len(judged_cases) == len(parsed_cases):
+                for judgement, case in zip(judged_cases, parsed_cases):
+                    judgement["raw_case"] = {
+                        "case_id": case.case_id,
+                        "pathogen": case.species_chinese or case.species_latin,
+                        "sample_type": case.sample_type,
+                        "phenotype": case.phenotype,
+                        "diagnosis": case.diagnosis,
+                        "immune_status": case.immune_status,
+                        "reads": case.reads,
+                        "coverage": case.coverage,
+                        "abundance": case.abundance,
+                    }
+                report_state = {"cases": judged_cases, "version": 1}
+                generated_pdf = export_review_report(report_state)
+            else:
+                generated_pdf = export_current_chat_pdf(chatbot)
         except Exception as exc:
             generated_pdf = None
             print(f"自动生成 mNGS PDF 失败: {exc}")
         # Keep generated reports together while Gradio serves them for download.
-        yield chatbot, empty_input, generated_pdf
+        yield chatbot, empty_input, generated_pdf, report_state, render_report_state(report_state)
 
     # 处理图片生成
     if answer[1] == userPurposeType.ImageGeneration:
@@ -209,6 +270,7 @@ def grodio_view(chatbot, chat_input):
 
 # 构建 Gradio 界面
 with gr.Blocks() as demo:
+    report_state = gr.State(None)
     # 创建聊天布局
     with gr.Row():
         with gr.Column(scale=10):
@@ -238,6 +300,15 @@ with gr.Blocks() as demo:
     export_pdf = gr.Button("重新生成 PDF", variant="secondary")
     export_file = gr.DownloadButton(label="下载 PDF 报告", variant="primary")
 
+    with gr.Accordion("医生审阅与报告修订", open=True):
+        report_preview = gr.Markdown("尚无可审阅的 mNGS 报告。")
+        doctor_feedback = gr.Textbox(
+            label="医生审阅意见",
+            placeholder="可补充病史/检查结果，指出证据解释需要调整之处，或列出希望报告回答的问题。",
+            lines=5,
+        )
+        revise_button = gr.Button("根据意见生成修订版", variant="primary")
+
     export_pdf.click(
         fn=export_current_chat_pdf,
         inputs=[chatbot],
@@ -247,7 +318,14 @@ with gr.Blocks() as demo:
     chat_input.submit(
         fn=grodio_view,
         inputs=[chatbot, chat_input],
-        outputs=[chatbot, chat_input, export_file],
+        outputs=[chatbot, chat_input, export_file, report_state, report_preview],
+    )
+
+    export_pdf.click(fn=export_review_report, inputs=[report_state], outputs=[export_file])
+    revise_button.click(
+        fn=review_report,
+        inputs=[doctor_feedback, report_state],
+        outputs=[report_state, report_preview, export_file, doctor_feedback],
     )
 
 
