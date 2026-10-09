@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -84,6 +85,56 @@ def judge_with_rag_stream(question: str, history: List[List | None] | None = Non
         yield "\n" + json.dumps({"cases": results}, ensure_ascii=False, indent=2)
 
     return generate()
+
+
+def revise_judgements_with_doctor_feedback(
+    cases: list[dict], feedback: str, *, client=None
+) -> list[dict]:
+    """Revise report explanations from clinician feedback while preserving labels."""
+    if not str(feedback or "").strip():
+        raise ValueError("请先填写医生审阅意见")
+    if client is None:
+        from cyber_doctor.client.client_factory import Clientfactory
+
+        client = Clientfactory().get_client()
+
+    revisions: list[dict] = []
+    for original in cases:
+        label = _str(original.get("label") or original.get("Label"))
+        prompt = f"""你负责修订 mNGS 可解释性报告。医生意见是报告修订要求，不是新的病例事实；只有医生明确提供的补充病史/检查结果才可作为新增病例信息，并须在报告中标明来源为医生补充。
+
+约束：
+1. 仅修订解释、临床匹配、证据局限和复核项；label 必须严格保持为“{label}”。
+2. 保留原始病例信息与初版报告中有效内容，不得臆造检查、文献或治疗建议。
+3. evidence 只能保留初版报告中的来源和证据，不可新增或改写引用来源；可根据意见调整其解释。
+4. 在 explanation 或 clinical_match 中清晰回应医生意见；对无法据现有信息解决的意见，应说明仍缺少什么。
+5. doctor_feedback 原文写入 JSON，便于审计。
+6. 只输出严格 JSON，不要 Markdown。
+
+原始病例：
+{json.dumps(original.get('raw_case') or {}, ensure_ascii=False)}
+
+初版报告：
+{json.dumps(original, ensure_ascii=False)}
+
+医生审阅意见：
+{feedback.strip()}
+
+返回字段：label、confidence、patient_summary、mngs_evidence、clinical_match、explanation、evidence、limitations、review_items、doctor_feedback。"""
+        result = _parse_model_judgement(client.chat_with_ai(prompt))
+        revised = dict(original)
+        for key in (
+            "confidence", "patient_summary", "mngs_evidence", "clinical_match",
+            "explanation", "evidence", "limitations", "review_items",
+        ):
+            if key in result:
+                revised[key] = result[key]
+        revised["label"] = label
+        revised["doctor_feedback"] = [*original.get("doctor_feedback", []), feedback.strip()]
+        revised["report_version"] = int(original.get("report_version") or 1) + 1
+        revised["raw_case"] = original.get("raw_case")
+        revisions.append(revised)
+    return revisions
 
 
 def parse_mngs_case(question: str) -> MNGSCase:
@@ -423,6 +474,15 @@ def load_pathogen_catalog() -> dict[str, dict]:
 
 def retrieve_mngs_evidence(case: MNGSCase) -> EvidenceBundle:
     queries = build_mngs_queries(case)
+    if os.getenv("MNGS_KNOWLEDGE_SOURCE", "structured").lower() == "graphml":
+        try:
+            from cyber_doctor.model.rag.graphml_retriever import retrieve
+            names = [case.species_latin, case.species_latin.replace("_", " ") if case.species_latin else "", case.species_chinese, case.genus_latin, case.genus_chinese]
+            docs = retrieve(_unique(names), top_k=8)
+        except Exception as exc:
+            print(f"graphml pathogen retrieval failed: {exc}")
+            docs = []
+        return EvidenceBundle(queries=queries, docs=docs, context=format_evidence_docs(docs))
     try:
         from cyber_doctor.model.rag.structured_retriever import retrieve
     except Exception as exc:
