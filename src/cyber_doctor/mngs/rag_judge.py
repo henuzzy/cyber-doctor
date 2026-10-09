@@ -88,7 +88,12 @@ def judge_with_rag_stream(question: str, history: List[List | None] | None = Non
 
 
 def revise_judgements_with_doctor_feedback(
-    cases: list[dict], feedback: str, *, client=None
+    cases: list[dict],
+    feedback: str,
+    *,
+    feedback_type: str = "修改报告解释",
+    target_section: str = "整体",
+    client=None,
 ) -> list[dict]:
     """Revise report explanations from clinician feedback while preserving labels."""
     if not str(feedback or "").strip():
@@ -101,7 +106,7 @@ def revise_judgements_with_doctor_feedback(
     revisions: list[dict] = []
     for original in cases:
         label = _str(original.get("label") or original.get("Label"))
-        prompt = f"""你负责修订 mNGS 可解释性报告。医生意见是报告修订要求，不是新的病例事实；只有医生明确提供的补充病史/检查结果才可作为新增病例信息，并须在报告中标明来源为医生补充。
+        prompt = f"""你负责修订 mNGS 可解释性报告。医生意见类型：{feedback_type}；关联章节：{target_section}。医生意见是报告修订要求，不是新的病例事实；只有医生明确提供的补充病史/检查结果才可作为新增病例信息，并须在报告中标明来源为医生补充。
 
 约束：
 1. 仅修订解释、临床匹配、证据局限和复核项；label 必须严格保持为“{label}”。
@@ -123,15 +128,11 @@ def revise_judgements_with_doctor_feedback(
 返回字段：label、confidence、patient_summary、mngs_evidence、clinical_match、explanation、evidence、limitations、review_items、doctor_feedback。"""
         result = _parse_model_judgement(client.chat_with_ai(prompt))
         revised = dict(original)
-        for key in (
-            "confidence", "patient_summary", "mngs_evidence", "clinical_match",
-            "explanation", "evidence", "limitations", "review_items",
-        ):
+        for key in ("confidence", "clinical_match", "explanation", "limitations", "review_items"):
             if key in result:
                 revised[key] = result[key]
         revised["label"] = label
         revised["doctor_feedback"] = [*original.get("doctor_feedback", []), feedback.strip()]
-        revised["report_version"] = int(original.get("report_version") or 1) + 1
         revised["raw_case"] = original.get("raw_case")
         revisions.append(revised)
     return revisions
@@ -145,16 +146,24 @@ def parse_mngs_case(question: str) -> MNGSCase:
     case.species_latin = _clean_taxon(_str(payload.get("Latin") or _quoted_field(question, "Latin")))
     case.species_chinese = _str(payload.get("Chinese") or _quoted_field(question, "Chinese"))
     case.name_id = _str(payload.get("NameID") or _quoted_field(question, "NameID"))
-    case.case_id = _str(payload.get("UUID") or payload.get("case_id") or _quoted_field(question, "UUID"))
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    case.case_id = _str(
+        payload.get("UUID")
+        or payload.get("case_id")
+        or metadata.get("sample_id")
+        or payload.get("id")
+        or _quoted_field(question, "UUID")
+    )
     case.existing_label = _extract_existing_label(payload)
     case.pathogen_type = _str(payload.get("病原类型") or _quoted_field(question, "病原类型"))
     case.sample_type = _str(
         payload.get("取样部位_from_prompt")
         or payload.get("取样部位_raw_metadata")
+        or metadata.get("stype")
         or _quoted_field(question, "取样部位_from_prompt")
         or _quoted_field(question, "取样部位_raw_metadata")
     )
-    case.immune_status = _normalize_immune_status(payload.get("mianyi"))
+    case.immune_status = _normalize_immune_status(payload.get("mianyi") or metadata.get("mianyi"))
 
     pathogen_info = _extract_dict_after(working_text, "病原基本信息")
     if pathogen_info:
@@ -180,6 +189,19 @@ def parse_mngs_case(question: str) -> MNGSCase:
     case.phenotype = case.phenotype or _dict_like_field(working_text, "临床表型")
     case.diagnosis = case.diagnosis or _dict_like_field(working_text, "医生诊断")
 
+    # Support the labeled patient and metric blocks used by the current JSONL
+    # export as well as the older dictionary-style prompt embedded in messages.
+    case.age = case.age or _search_labeled_value(working_text, "年龄")
+    case.sex = case.sex or _search_labeled_value(working_text, "性别")
+    case.sample_type = case.sample_type or _search_labeled_value(working_text, "取样部位")
+    case.immune_status = case.immune_status or _search_labeled_value(working_text, "免疫状态")
+    case.phenotype = case.phenotype or _search_labeled_value(working_text, "临床表现", "临床表型")
+    case.diagnosis = case.diagnosis or _search_labeled_value(working_text, "临床诊断", "医生诊断")
+    case.pathogen_type = case.pathogen_type or _search_labeled_value(working_text, "病原类型")
+    case.species_chinese = case.species_chinese or _search_labeled_value(working_text, "种-中文名")
+    case.genus_chinese = case.genus_chinese or _search_labeled_value(working_text, "属-中文名")
+    case.pathogenicity_text = case.pathogenicity_text or _search_labeled_value(working_text, "病原描述")
+
     case.reads = _search_value(working_text, r"种-检出序列数：([^。\n]+)")
     case.genus_reads = _search_value(working_text, r"属-检出序列数为([^。\n]+)")
     case.coverage = _search_value(working_text, r"覆盖率：([^。\n]+)")
@@ -189,7 +211,17 @@ def parse_mngs_case(question: str) -> MNGSCase:
     case.species_rank = _search_value(working_text, r"种的排序为：([^，。\n]+)") or _str(payload.get("种排名"))
     case.sample_type = _search_value(working_text, r"mNGS检测组织为：([^，。\n]+)") or case.sample_type
     case.immune_status = _search_value(working_text, r"患者的免疫状态为：([^，。\n]+)") or case.immune_status
-    case.pathogenicity_text = _search_value(working_text, r"病原的致病信息为：(.+?)(?:\n\n|输出要求|$)", flags=re.S)
+    case.pathogenicity_text = (
+        _search_value(working_text, r"病原的致病信息为：(.+?)(?:\n\n|输出要求|$)", flags=re.S)
+        or case.pathogenicity_text
+    )
+    case.reads = case.reads or _search_labeled_value(working_text, "种-检出特异序列数")
+    case.genus_reads = case.genus_reads or _search_labeled_value(working_text, "属-检出特异序列数")
+    case.species_rank = case.species_rank or _search_labeled_value(working_text, "种-检出排名")
+    case.genus_rank = case.genus_rank or _search_labeled_value(working_text, "属-检出排名")
+    case.coverage = case.coverage or _search_labeled_value(working_text, "基因组覆盖率")
+    case.abundance = case.abundance or _search_labeled_value(working_text, "种-相对丰度")
+    case.genus_abundance = case.genus_abundance or _search_labeled_value(working_text, "属-相对丰度")
     apply_mngs_fallbacks(case, working_text)
     enrich_case_from_catalog(case)
     if not case.species_latin and not case.species_chinese:
@@ -885,6 +917,18 @@ def _dict_like_field(text: str, key: str) -> str:
         match = re.search(pattern, text)
         if match:
             return match.group(1).strip()
+    return ""
+
+
+def _search_labeled_value(text: str, *labels: str) -> str:
+    """Read a value from a standalone `label: value` line, allowing unit notes."""
+    for label in labels:
+        match = re.search(
+            rf"(?m)^\s*{re.escape(label)}(?:\s*[（(][^）)\r\n]*[）)])?\s*[：:]\s*([^\r\n]*)",
+            text,
+        )
+        if match:
+            return _squash(match.group(1))
     return ""
 
 

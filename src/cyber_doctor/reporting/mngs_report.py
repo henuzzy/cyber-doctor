@@ -153,7 +153,13 @@ def export_latest_chat_pdf(output_path: str, history: list[list[Any]] | None) ->
     return export_judgements_pdf(output_path, judgements)
 
 
-def export_report_pdf(output_path: str, judgements: Sequence[Mapping[str, Any]], *, version: int = 1) -> str:
+def export_report_pdf(
+    output_path: str,
+    judgements: Sequence[Mapping[str, Any]],
+    *,
+    version: int = 1,
+    status: str = "in_review",
+) -> str:
     """Export a versioned report without reading or mutating chat history."""
     versioned = []
     for item in judgements:
@@ -163,17 +169,21 @@ def export_report_pdf(output_path: str, judgements: Sequence[Mapping[str, Any]],
     cases = [case_from_judgement(item) for item in versioned]
     labels = {str(case.get("label") or "") for case in cases}
     label_prefix = next(iter(labels)) if len(labels) == 1 and next(iter(labels)) in {"有害", "无害"} else ""
+    status_label = "医生已确认" if status == "confirmed" else "医生审阅中"
     return build_explainability_pdf(
         output_path,
         cases=cases,
         title=f"{_count_text(len(cases))}个{label_prefix}病原可解释性诊断报告（第{version}版）",
-        subtitle="基于结构化 PubMed / UpToDate 文档与医生审阅意见",
+        subtitle=(
+            f"基于结构化 PubMed / UpToDate 文档与医生审阅意见 · {status_label}"
+            if version > 1 else f"基于结构化 PubMed / UpToDate 文档生成的初版解释 · {status_label}"
+        ),
         scope=(
             "本报告在既有 mNGS 判别解释基础上，结合医生审阅意见进行修订。修订仅更新解释、证据关联和复核项；"
-            "既有判定标签保持不变，报告不替代临床诊断或治疗决定。"
+            f"既有判定标签保持不变。当前状态：{status_label}。报告不替代临床诊断或治疗决定。"
             if version > 1 else
             "本报告逐例匹配病原相关的结构化 PubMed 和 UpToDate 文档，将文档证据与病例信息一并交由模型分析，"
-            "并汇总输入中的全部病原。已有结论仅作解释，不因背景文献自动改判。"
+            f"并汇总输入中的全部病原。已有结论仅作解释，不因背景文献自动改判。当前状态：{status_label}。"
         ),
         compact=len(cases) > 1,
     )
