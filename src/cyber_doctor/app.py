@@ -25,12 +25,10 @@ from cyber_doctor.mngs.session import (
     create_report_session,
     create_report_workspace,
     reopen_report_session,
-    select_report_session,
     update_report_session,
 )
 from cyber_doctor.ui.workbench import (
     HEADER,
-    format_session_time,
     render_history,
     render_overview,
     render_processing_report,
@@ -138,18 +136,6 @@ def report_scope_choices(report_state):
     return gr.update(choices=choices, value="全部病例")
 
 
-def report_session_choices(report_state):
-    sessions = (report_state or {}).get("sessions", [])
-    choices = [
-        (
-            f"{item.get('title') or 'mNGS报告'} · {format_session_time(item.get('created_at'))} · {item.get('session_id', '')[:6]}",
-            item.get("session_id"),
-        )
-        for item in sessions
-    ]
-    return gr.update(choices=choices, value=(report_state or {}).get("active_session_id"))
-
-
 def review_report(feedback, feedback_type, target_section, case_scope, report_state):
     session = active_report_session(report_state)
     if not session or not session.get("cases"):
@@ -183,13 +169,6 @@ def review_report(feedback, feedback_type, target_section, case_scope, report_st
     return state, render_report_state(state), export_review_report(state), ""
 
 
-def change_report_session(session_id, report_state):
-    if not report_state or not report_state.get("sessions"):
-        raise ValueError("当前会话还没有可切换的报告")
-    state = select_report_session(report_state, session_id)
-    return state, render_report_state(state), export_review_report(state), report_scope_choices(state), ""
-
-
 def confirm_current_report(report_state):
     session = active_report_session(report_state)
     if not session or not session.get("cases"):
@@ -220,7 +199,7 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
     bot_response = "正在读取病例资料…"
     chatbot = chatbot or []
     chatbot.append([user_message, bot_response])
-    yield chatbot, empty_input, None, report_state, render_processing_report(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+    yield chatbot, empty_input, None, report_state, render_processing_report(report_state), report_scope_choices(report_state), gr.skip()
 
     # 处理用户上传的文件
     images = []
@@ -257,7 +236,7 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
                     <img src="data:image/png;base64,{image}" alt="Generated Image" style="max-width: 100%; height: auto; cursor: pointer;" />
                 </div>
                 """
-            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), gr.skip()
     else:
         image_url = None
 
@@ -303,7 +282,7 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
                 render_processing_report(report_state, progress_lines[-1] if progress_lines else "正在分析病例与文献证据。")
                 if answer[1] == userPurposeType.MNGSJudge else render_report_state(report_state)
             )
-            yield chatbot, empty_input, None, report_state, preview, report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+            yield chatbot, empty_input, None, report_state, preview, report_scope_choices(report_state), gr.skip()
 
     if answer[1] == userPurposeType.MNGSJudge and bot_response.strip():
         try:
@@ -345,7 +324,7 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
             generated_pdf = None
             print(f"自动生成 mNGS PDF 失败: {exc}")
         # Keep generated reports together while Gradio serves them for download.
-        yield chatbot, empty_input, generated_pdf, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), ""
+        yield chatbot, empty_input, generated_pdf, report_state, render_report_state(report_state), report_scope_choices(report_state), ""
 
     # 处理图片生成
     if answer[1] == userPurposeType.ImageGeneration:
@@ -362,14 +341,14 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
             {describe[0]}
             """
         chatbot[-1][1] = combined_message
-        yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+        yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), gr.skip()
 
     # 处理图片描述
     if answer[1] == userPurposeType.ImageDescribe:
         for i in range(0, len(answer[0]), 1):
             bot_response += answer[0][i : i + 1]  # 累加当前chunk到combined_message
             chatbot[-1][1] = bot_response  # 更新chatbot对话中的最后一条消息
-            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+        yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), gr.skip()
 
     # 处理联网搜索
     if answer[1] == userPurposeType.InternetSearch:
@@ -385,11 +364,11 @@ def grodio_view(chatbot, chat_input, previous_report_state=None):
         for i in range(0, len(output_message)):
             bot_response = output_message[: i + 1]
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+        yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), gr.skip()
         for chunk in answer[0]:
             bot_response = bot_response + (chunk.choices[0].delta.content or "")
             chatbot[-1][1] = bot_response
-            yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), report_session_choices(report_state), gr.skip()
+        yield chatbot, empty_input, None, report_state, render_report_state(report_state), report_scope_choices(report_state), gr.skip()
 
 
 # 构建 Gradio 界面
@@ -428,15 +407,6 @@ with gr.Blocks(
 
     with gr.Row(elem_id="workspace"):
         with gr.Column(scale=2, min_width=215, elem_id="case-sidebar"):
-            gr.HTML(
-                '<div class="panel-title"><span class="eyebrow">CASE WORKSPACE</span>'
-                '<h2>病例工作区</h2><p>选择已有报告，或提交新的病例资料。</p></div>',
-                elem_classes="plain-html",
-            )
-            report_session_picker = gr.Dropdown(
-                choices=[], value=None, label="病例 / 报告会话",
-                info="不同输入分别保存为独立报告会话。",
-            )
             session_note = gr.HTML(render_session_note(None), elem_id="session-note")
             gr.HTML(
                 '<div class="panel-title"><h2>病例输入</h2>'
@@ -522,7 +492,7 @@ with gr.Blocks(
     ]
     generation_outputs = [
         chatbot, chat_input, export_file, report_state, report_preview,
-        review_scope, report_session_picker, doctor_feedback,
+        review_scope, doctor_feedback,
     ]
     # All report-changing events share one queue so the selected session stays coherent.
     report_events = {"concurrency_id": "report-workspace", "concurrency_limit": 1}
@@ -531,13 +501,6 @@ with gr.Blocks(
             fn=grodio_view, inputs=[chatbot, chat_input, report_state],
             outputs=generation_outputs, **report_events,
         ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
-
-    report_session_picker.input(
-        fn=change_report_session,
-        inputs=[report_session_picker, report_state],
-        outputs=[report_state, report_preview, export_file, review_scope, doctor_feedback],
-        **report_events,
-    ).then(fn=refresh_workspace_ui, inputs=[report_state], outputs=refresh_outputs)
 
     export_pdf.click(fn=export_review_report, inputs=[report_state], outputs=[export_file], **report_events)
     revise_button.click(

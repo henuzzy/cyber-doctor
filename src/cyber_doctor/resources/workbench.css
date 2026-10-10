@@ -111,7 +111,25 @@ body, gradio-app { background: var(--background-fill-primary, #f3f6f8); }
 #workspace label span, #workspace .wrap > span { font-size: 12px; }
 #case-chat { border: 1px solid var(--cd-border); border-radius: 14px; }
 #workspace-footer { text-align: center; font-size: 11px; color: var(--cd-muted); padding-top: 14px; line-height: 1.8; }
-@media (min-width: 1280px) { #doctor-panel { position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; } }
+@media (min-width: 1200px) {
+  #workspace { --cd-workspace-height: max(480px, calc(100dvh - 280px)); align-items: stretch; }
+  #case-sidebar, #report-column, #doctor-panel {
+    height: var(--cd-workspace-height); min-height: 0; box-sizing: border-box; flex-wrap: nowrap;
+  }
+  #case-sidebar, #doctor-panel {
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable;
+  }
+  #case-sidebar > *, #doctor-panel > * { flex: 0 0 auto !important; min-width: 0 !important; }
+  #report-column { overflow: hidden; }
+  #report-tabs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  #report-tabs > .tab-nav { flex-shrink: 0; }
+  #report-tabs > .tabitem {
+    flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain; scrollbar-gutter: stable;
+  }
+  #report-tabs > .tabitem > div:has(> #case-chat) { height: 100%; min-height: 0; flex-wrap: nowrap; }
+  #case-chat { height: 100% !important; min-height: 0 !important; }
+}
 @media (max-width: 1199px) {
   #case-sidebar { flex: 0 0 215px !important; padding: 17px; }
   #doctor-panel { flex: 1 1 100% !important; }
