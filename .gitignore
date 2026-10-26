@@ -25,6 +25,7 @@ data/
 !/scripts/data/
 /scripts/data/*
 !/scripts/data/collect_pubmed_fulltext.py
+!/scripts/data/extract_first20_structured.py
 konwledge-base/
 *.chunks.jsonl
 *.sections.jsonl
@@ -58,6 +59,13 @@ build/
 /audio/
 /ppt_docx/
 /tmp/
+/backups/
+病原文献/
+病原结构化信息*/
+pathogen_knowledge*.json
+*checkpoint*.json
+raw_cache/
+patient_data/
 /mNGS_*.pdf
 *.pdf
 *.docx

@@ -47,18 +47,36 @@ def is_mngs_judgement_question(question: str) -> bool:
 
 def parse_question(question: str, image_url=None) -> userPurposeType:
 
+    archive_markers = ("五维知识", "五维档案", "病原知识档案", "病原档案")
+    explicit_mngs_markers = ("mngs", "检出序列", "覆盖率", "reads", "丰度", "取样部位", "检测组织", "样本部位", "患者信息", "病例", "原始结论", "有害", "无害", "label", "originalflag")
+    is_case = any(marker in question.casefold() for marker in explicit_mngs_markers)
+    if any(marker in question for marker in archive_markers) and not is_case:
+        return purpose_map["病原档案查询"]
+
+    # A bare organism name is a knowledge lookup when a five-dimension archive
+    # is configured. Case-like mNGS requests are still routed to the judgement
+    # workflow above, where both archive and article evidence are retrieved.
+    if not is_case:
+        try:
+            from cyber_doctor.model.rag.five_dimension_retriever import is_exact_name
+
+            if is_exact_name(question):
+                return purpose_map["病原档案查询"]
+        except Exception:
+            pass
+
     if is_mngs_judgement_question(question):
         return purpose_map["mNGS判别"]
 
     if "根据知识库" in question:
         return purpose_map["基于知识库"]
-    
+
     if "根据知识图谱" in question:
         return purpose_map["基于知识图谱"]
 
     if "搜索" in question:
         return purpose_map["网络搜索"]
-    
+
     if image_url is not None:
         return purpose_map["图片描述"]
 
@@ -72,6 +90,3 @@ def parse_question(question: str, image_url=None) -> userPurposeType:
     if response == "文本生成":
         return purpose_map["文本生成"]
     return purpose_map["其他"]
-
-
-

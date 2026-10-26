@@ -10,6 +10,7 @@ class userPurposeType(Enum):
     InternetSearch = 8 #网络搜索
     MNGSJudge = 9 #mNGS单病原有害/无害判别
     KnowledgeGraph = 10 #基于知识图谱的问答
+    PathogenKnowledge = 11 #按名称查询五维病原知识档案
  
   
 purpose_map={
@@ -22,5 +23,5 @@ purpose_map={
 "网络搜索":userPurposeType.InternetSearch,
 "mNGS判别":userPurposeType.MNGSJudge,
 "基于知识图谱":userPurposeType.KnowledgeGraph,
+"病原档案查询":userPurposeType.PathogenKnowledge,
 }
-

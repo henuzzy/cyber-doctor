@@ -36,11 +36,11 @@ cyber-doctor/
 
 ## Data Boundaries
 
-- `structured/` is the DGX project's structured pathogen knowledge repository.
-  Keep it at the project root, alongside `src/`, and point
-  `STRUCTURED_KNOWLEDGE_ROOT` to it (for example,
-  `/home/zhangyue/experiments/cyber-doctor-qwen/structured`). It is ignored by
-  Git so clinical/article data is not committed with source code.
+- Structured article JSON and five-dimension pathogen archives are runtime
+  data. Store them outside the source checkout and configure
+  `STRUCTURED_KNOWLEDGE_ROOT` and `FIVE_DIMENSION_KNOWLEDGE_ROOT` with the
+  deployment's own paths. These data are ignored by Git and are not committed
+  with source code.
 - `.env`, other user knowledge bases, vector-store data, caches and logs are
   runtime state and are not committed. On a developer machine, the structured
   knowledge root may instead point to a separately managed local data folder.

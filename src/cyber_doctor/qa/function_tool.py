@@ -33,7 +33,7 @@ def relation_tool(entities: List[Dict] | None) -> str | None:
 
         # 查询每个实体与其他实体的关系a-r-b
         relationship_match.append(_dao.query_relationship_by_name(entity_name))
-        
+
     # 抽取并记录每个实体与其他实体的关系
     for i in range(len(relationship_match)):
         for record in relationship_match[i]:
@@ -122,6 +122,41 @@ def MNGS_judge_tool(
     return (response, question_type)
 
 
+def pathogen_knowledge_tool(
+    question_type: userPurposeType,
+    question: str,
+    history: List[List | None] = None,
+    image_url=None,
+):
+    """Expose the five-dimension archive as a direct name-query workflow."""
+    import json
+    from cyber_doctor.model.rag.five_dimension_retriever import search
+
+    def generate():
+        matches = search(question, top_k=8)
+        if not matches:
+            yield "未检索到五维病原知识档案。请检查 FIVE_DIMENSION_KNOWLEDGE_ROOT 是否指向档案 JSON 文件或其目录。"
+            return
+        records = []
+        for match in matches:
+            record = match.record
+            info = record.get("病原信息") or record.get("pathogen_info") or {}
+            records.append({
+                "病原信息": info,
+                "五维知识": record.get("五维知识") or record.get("knowledge") or {},
+                "名称匹配范围": match.support_scope,
+                "原文证据范围": {
+                    name: item.get("证据范围") or item.get("scope") or "未单独标注，请核查概述限定语与原文"
+                    for name, item in (record.get("五维知识") or {}).items() if isinstance(item, dict)
+                },
+                "匹配字段": match.matched_by,
+                "档案文件": match.source_file,
+            })
+        yield json.dumps({"病原档案": records}, ensure_ascii=False, indent=2)
+
+    return (generate(), question_type)
+
+
 # 处理ImageGeneration问题的函数
 def process_images_tool(question_type, question, history, image_url=None):
     client = Clientfactory.get_special_client(client_type=question_type)
@@ -183,6 +218,7 @@ QUESTION_TO_FUNCTION = {
     userPurposeType.text: process_text_tool,
     userPurposeType.RAG: RAG_tool,
     userPurposeType.MNGSJudge: MNGS_judge_tool,
+    userPurposeType.PathogenKnowledge: pathogen_knowledge_tool,
     userPurposeType.ImageGeneration: process_images_tool,
     userPurposeType.InternetSearch: process_InternetSearch_tool,
     userPurposeType.ImageDescribe: process_image_describe_tool,

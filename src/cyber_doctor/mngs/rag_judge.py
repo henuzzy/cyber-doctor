@@ -506,50 +506,83 @@ def load_pathogen_catalog() -> dict[str, dict]:
 
 def retrieve_mngs_evidence(case: MNGSCase) -> EvidenceBundle:
     queries = build_mngs_queries(case)
-    if os.getenv("MNGS_KNOWLEDGE_SOURCE", "structured").lower() == "graphml":
-        try:
-            from cyber_doctor.model.rag.graphml_retriever import retrieve
-            names = [case.species_latin, case.species_latin.replace("_", " ") if case.species_latin else "", case.species_chinese, case.genus_latin, case.genus_chinese]
-            docs = retrieve(_unique(names), top_k=8)
-        except Exception as exc:
-            print(f"graphml pathogen retrieval failed: {exc}")
-            docs = []
-        return EvidenceBundle(queries=queries, docs=docs, context=format_evidence_docs(docs))
-    try:
-        from cyber_doctor.model.rag.structured_retriever import retrieve
-    except Exception as exc:
-        print(f"structured pathogen retriever is unavailable: {exc}")
-        return EvidenceBundle(queries=queries, docs=[], context=format_evidence_docs([]))
-
     species_names = [
         case.name_id,
         case.species_chinese,
         case.species_latin,
         case.species_latin.replace("_", " ") if case.species_latin else "",
+        *[alias for alias in case.aliases if _normalize_name(alias) not in {
+            _normalize_name(case.genus_chinese), _normalize_name(case.genus_latin)}],
     ]
+    genus_names = [case.genus_chinese, case.genus_latin, case.genus_latin.replace("_", " ") if case.genus_latin else ""]
+    article_docs: list[Document] = []
     try:
-        docs = retrieve(species_names, top_k=12)
-        for doc in docs:
+        from cyber_doctor.model.rag.structured_retriever import retrieve
+
+        article_docs = retrieve(_unique(species_names), top_k=12)
+        for doc in article_docs:
             record = doc.metadata.get("structured_record") or {}
-            names = record.get("病原名称") or {}
+            names = record.get("病原名称") or record.get("pathogen") or {}
+            source_info = record.get("source") or {}
+            species = names.get("种") or names.get("species") or {}
             target_species = _normalize_name(case.species_latin)
-            article_species = _normalize_name(names.get("种-拉丁名") or names.get("种-中文名"))
-            if target_species and article_species == target_species:
+            article_species = _normalize_name(
+                names.get("种-拉丁名")
+                or names.get("种-中文名")
+                or species.get("拉丁名")
+                or species.get("中文名")
+                or names.get("species_latin")
+                or names.get("species_chinese")
+            )
+            evidence_scope = record.get("scope") or record.get("evidence_scope") or "unknown"
+            if evidence_scope == "background_group":
+                scope = "更大病原群背景证据"
+            elif evidence_scope == "genus_or_group":
+                scope = "同属或相关病原群参考"
+            elif evidence_scope == "species_direct" and target_species and article_species == target_species:
                 scope = "目标物种直接匹配"
+            elif target_species and article_species == target_species:
+                scope = "目标物种名称匹配，原文证据范围未确认"
             elif case.name_id and str(record.get("NameID") or "") == case.name_id:
                 scope = "病例关联文件夹中的同类或相关病原参考"
             else:
                 scope = "同属或相关病原群参考"
             doc.metadata["support_scope"] = scope
-        if not docs:
-            related_names = [case.genus_chinese, case.genus_latin]
+            doc.metadata["evidence_scope"] = evidence_scope
+            doc.metadata["article_source"] = source_info
+        if not article_docs:
+            related_names = list(genus_names)
             related_names.extend(re.findall(r"\b([A-Z][a-z]+)\s+[a-z][A-Za-z-]+\b", case.pathogenicity_text))
-            docs = retrieve(_unique(related_names), top_k=12)
-            for doc in docs:
+            article_docs = retrieve(_unique(related_names), top_k=12)
+            for doc in article_docs:
                 doc.metadata.setdefault("support_scope", "同属或相关病原群参考")
     except Exception as exc:
         print(f"structured pathogen retrieval failed: {exc}")
-        docs = []
+        article_docs = []
+
+    five_dimension_docs: list[Document] = []
+    try:
+        from cyber_doctor.model.rag.five_dimension_retriever import retrieve as retrieve_five_dimensions
+
+        five_dimension_docs = retrieve_five_dimensions(_unique(species_names), top_k=3)
+        if not five_dimension_docs:
+            five_dimension_docs = retrieve_five_dimensions(_unique(genus_names), top_k=3)
+        for doc in five_dimension_docs:
+            if not doc.metadata.get("support_scope"):
+                doc.metadata["support_scope"] = "五维档案名称匹配"
+    except Exception as exc:
+        print(f"five-dimension pathogen retrieval failed: {exc}")
+
+    graphml_docs: list[Document] = []
+    if os.getenv("MNGS_KNOWLEDGE_SOURCE", "structured").lower() == "graphml":
+        try:
+            from cyber_doctor.model.rag.graphml_retriever import retrieve as retrieve_graphml
+
+            graphml_docs = retrieve_graphml(_unique(species_names + genus_names), top_k=8)
+        except Exception as exc:
+            print(f"graphml pathogen retrieval failed: {exc}")
+
+    docs = five_dimension_docs + article_docs + graphml_docs
     return EvidenceBundle(queries=queries, docs=docs, context=format_evidence_docs(docs))
 
 
@@ -678,13 +711,33 @@ def format_evidence_docs(docs: list[Document], max_docs: int = 12, max_chars: in
         title = metadata.get("title") or metadata.get("doc_name") or metadata.get("source") or metadata.get("source_file") or "未知来源"
         section = metadata.get("section") or metadata.get("chapter") or ""
         page = metadata.get("page", metadata.get("page_number", ""))
-        source = metadata.get("doc_path") or metadata.get("source") or metadata.get("source_file") or ""
+        source = metadata.get("doc_path") or metadata.get("source_file") or ""
         source_type = metadata.get("source") or "来源未标注"
         support_scope = metadata.get("support_scope") or "关联范围未标注"
         citation = f"{title} | {source_type} | {section or '未标注章节'}"
+        record = metadata.get("structured_record") or {}
+        article_info = record.get("文章信息") or {}
+        article_source = metadata.get("article_source") or record.get("source") or {}
+        identifiers = [
+            f"PMID {article_info.get('PMID') or article_source.get('pmid')}" if article_info.get("PMID") or article_source.get("pmid") else "",
+            f"DOI {article_info.get('DOI') or article_source.get('doi')}" if article_info.get("DOI") or article_source.get("doi") else "",
+        ]
+        if any(identifiers):
+            citation += " | " + " | ".join(item for item in identifiers if item)
+        five_record = metadata.get("five_dimension_record") or {}
+        five_info = five_record.get("病原信息") or {}
+        five_taxonomy = five_info.get("名称与分类") or {}
+        species = five_taxonomy.get("种") or {}
+        genus = five_taxonomy.get("属") or {}
+        if metadata.get("knowledge_kind") == "five_dimension":
+            citation += " | 五维病原档案"
         if page not in ("", None, -1):
             citation = f"{citation} | 页码: {page}"
-        text = _squash(doc.page_content)[:max_chars]
+        limit = max(max_chars, 12000 if metadata.get("knowledge_kind") == "five_dimension" else 6000)
+        full_text = _squash(doc.page_content)
+        text = full_text[:limit]
+        if len(full_text) > limit:
+            text += " [证据内容已截断，未展示部分不得作为引用依据]"
         blocks.append(
             "\n".join(
                 [
@@ -694,9 +747,11 @@ def format_evidence_docs(docs: list[Document], max_docs: int = 12, max_chars: in
                     f"来源: {title}",
                     f"来源类型: {source_type}",
                     f"与目标病原关系: {support_scope}",
+                    f"原文证据范围: {metadata.get('evidence_scope') or '未单独标注，需核查原文'}",
                     f"章节: {section}" if section else "章节: 未标注",
                     f"页码: {page}" if page not in ("", None, -1) else "页码: 未标注",
                     f"文件: {source}" if source else "文件: 未标注",
+                    f"病原分类: 种={species.get('拉丁名') or species.get('中文名') or '未提供'}; 属={genus.get('拉丁名') or genus.get('中文名') or '未提供'}" if metadata.get("knowledge_kind") == "five_dimension" else "",
                     f"内容: {text}",
                 ]
             )
@@ -739,7 +794,12 @@ def build_judge_prompt(case: MNGSCase, evidence: EvidenceBundle) -> str:
         if case.existing_label
         else "本病例没有提供既有结论；请结合病例和知识库判断有害或无害，并解释判断。"
     )
-    return f"""你是临床感染病学和 mNGS 可解释性报告专家。请基于按病原名称匹配到的结构化 PubMed 和 UpToDate 文章，并结合当前病例信息，生成单病例的结构化解释结果。
+    return f"""你是临床感染病学和 mNGS 可解释性报告专家。请同时基于按病原名称匹配到的五维病原概要档案与逐篇结构化 PubMed/UpToDate 原文证据，并结合当前病例信息，生成单病例的结构化解释结果。
+
+知识使用规则：
+1. 五维档案用于提供物种描述、致病性、毒力因子、耐药性、治疗与预后概要；逐篇文章 JSON 用于提供可追溯的具体研究证据。两者都要使用；档案缺失或文献未检索到时应如实说明。
+2. 严格区分证据块的“与目标病原关系”与原文“证据范围”。只有目标物种直接证据可以支持物种级表述；属或相关病原群证据只能作为背景。
+3. 引用来源必须对应证据块中的来源字段，不要把五维档案伪装成 PubMed/UpToDate 原文。
 
 任务边界：{task_rule}
 

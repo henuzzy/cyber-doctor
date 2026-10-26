@@ -139,7 +139,8 @@ LLM_API_KEY=服务要求的值
 MODEL_NAME=qwen3.8-27b
 LLM_PROVIDER=qwen
 QWEN_ENABLE_THINKING=0
-STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/outputs/病原结构化信息
+STRUCTURED_KNOWLEDGE_ROOT=/path/to/structured-articles
+FIVE_DIMENSION_KNOWLEDGE_ROOT=/path/to/pathogen_knowledge_all_simple.json
 GRADIO_SERVER_PORT=10032
 ```
 
@@ -250,3 +251,8 @@ cyber-doctor/
 - 结构化知识库和原始文献不随源代码发布，需要单独配置 `STRUCTURED_KNOWLEDGE_ROOT`。
 - 运行时默认不主动联网采集文献；文献采集和五维知识整理需要单独运行数据准备脚本。
 
+## 病原五维档案与逐篇文献
+
+运行时同时读取五维病原知识档案和逐篇结构化文献。可以直接输入病原中文/拉丁名、属名或 NameID 查询五维档案；mNGS 解读会并行检索五维概要和逐篇 PubMed/UpToDate 证据，并区分目标物种直接证据与属级或相关病原群背景。
+
+原始 Markdown 的通用逐篇抽取命令、配置方式、输出格式和续跑说明见 [`docs/pathogen-literature-and-runtime-knowledge.md`](docs/pathogen-literature-and-runtime-knowledge.md)。`scripts/data/extract_first20_structured.py` 默认处理指定文献目录下的全部文章，不设置固定机器路径或默认病原数量。原始文献、结构化文章 JSON、五维档案和检查点均为运行时数据，不提交到 Git。
