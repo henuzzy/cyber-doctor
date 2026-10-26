@@ -1,644 +1,252 @@
-## 项目背景
+# Cyber Doctor：mNGS 报告解读与审阅工作台
 
-医疗资源不平衡一直以来是社会关注的重点问题，它导致众多医疗不公平事件发生。在相对落后地区的人们想要获得优秀的医疗资源往往需要前往一线城市，这不仅费时费力费钱，而且极大的影响了他们的接受医疗救助的基本权利。当前多模态大语言模型不断发展，在许多领域都有了不错的应用。我们小组基于东南大学暑期实训课程，开发了一个医疗健康领域的多模态大模型，这个大模型的目标用户是所有对自己健康关心的人，帮助进行基本的疾病诊断，病历分析，专业知识答疑等功能。本项目狭义上可以作为一个多功能的健康小助手，帮助管理个人健康，提供基础的医疗建议；广义上可以配置在任何领域，通过微调的大模型和RAG技术让大模型掌握目标领域的专业知识，成为任意专业的专家。
+Cyber Doctor 是一个面向 mNGS 病原检出结果的研究型报告解读系统。它把病例资料、mNGS 检测指标和病原知识库证据交给大模型，生成可追溯的病原有害性解释，并提供医生审阅、报告修订、确认和 PDF 导出流程。
 
-## 界面展示
+系统用于辅助临床复核和科研评估，不替代培养、靶向 PCR、临床诊断或治疗决定。
 
+## 当前项目范围
 
+当前交付的核心流程是：
 
-## 功能特色
+1. 接收一份包含一个或多个病原的 mNGS 病例资料。
+2. 解析病原名称、NameID、样本部位、临床表型、患者信息、免疫状态和 reads、覆盖率、丰度、排名等检测指标。
+3. 按种名、属名、中文名或 NameID 匹配本地结构化病原文献。
+4. 将病例事实和文献证据提交给 Qwen，生成有害/无害判定解释、证据引用、临床匹配说明、局限性和复核项。
+5. 在工作台中由医生提出意见，生成新的报告版本，确认或重新打开审阅。
+6. 导出当前报告版本的可解释性 PDF。
 
-- **多功能多模态整合，借助AI智能体判断任务的种类，将多个模型整合工作，解决复杂问题。**
-
-## 功能介绍
-
-| 功能         | 功能介绍                                                                                                 |
-| ------------ | -------------------------------------------------------------------------------------------------------- |
-| 图片识别     | 借助多模态大模型的能力，识别图片中的图像和文字。可用于识别病历，识别药品说明书等                         |
-| 图片生成     | 借助多模态大模型的能力，生成图片                                                                         |
-| 多轮对话     | 具有记忆功能，对话界面的所有内容会作为历史记录一同输入大模型                                             |
-| 检索增强对话 | 多模态输入框不只能输入文本，还能上传文件。大模型会根据文件内容调整输出                                   |
-| 知识图谱增强 | 支持配置相关领域的neo4j知识图谱，用专业知识改善大模型输出                                                |
-| 知识库增强   | 支持利用多种格式的文件作为专属知识库，大模型会结合知识库中的文件进行输出                                 |
-| 联网检索增强 | 通过自动化爬虫检索网络上的相关信息，利用网络增强大模型知识的时效性                                       |
-| mNGS病原判别 | 面向单个mNGS检出病原，先检索医学知识库，再结合患者信息、检出可信度、样本部位和免疫状态判断“有害/无害” |
-
-## mNGS病原判别流程
-
-当前项目已经适配 mNGS 单病原有害性判别任务。对于包含 `mNGS`、`病原基本信息`、`患者信息`、`Label`、`Latin`、`Chinese` 等字段的输入，系统会自动进入 mNGS 判别链路，不再需要用户显式输入“根据知识库”。
-
-处理流程如下：
+端到端流程如下：
 
 ```text
-病例/病原输入
-  -> 识别为 mNGS 判别任务
-  -> 解析病原名、属名、样本类型、临床表型、诊断、免疫状态、reads、coverage、丰度、排名
-  -> 生成多条医学检索 query
-  -> 按病原名称匹配结构化 PubMed/UpToDate 文档
-  -> 将检索证据 + 原始病例信息一起送给 LLM
-  -> 输出 label、解释、证据引用和局限性
+病例文本或 Markdown/TXT/PDF/Word
+        ↓
+病例与 mNGS 字段解析
+        ↓
+病原名称匹配结构化 PubMed/UpToDate 文献
+        ↓
+Qwen 生成结构化 mNGS 解读
+        ↓
+证据阅读与医生审阅
+        ↓
+报告版本确认与 PDF 导出
 ```
 
-LLM 输出格式要求为严格 JSON：
+## 工作台功能
+
+### 病例输入
+
+界面支持粘贴病例资料，也支持上传 Markdown、TXT、PDF 和 Word 文件。一份输入可以包含多个病原，系统会按病例逐例生成解读。可识别的字段包括：
+
+- 病原名称：`NameID`、`Latin`、`Chinese`、种名、属名和别名
+- 判定信息：`Label`、`OriginalFlag` 或已有的有害/无害结论
+- mNGS 指标：种/属 reads、覆盖率、丰度、种/属排名
+- 临床信息：样本或检测组织、年龄、性别、诊断、临床表型和免疫状态
+
+如果输入已经包含既有判定，系统的任务是解释该判定，不会用背景文献自动推翻它。
+
+### 证据驱动的 mNGS 解读
+
+默认从 `STRUCTURED_KNOWLEDGE_ROOT` 指定的结构化病原文献目录读取证据。检索优先使用目标物种；没有目标物种文献时，可以回退到属或相关病原群，但结果会标注证据范围，避免把属级信息写成目标物种事实。
+
+模型输出的核心字段为：
 
 ```json
 {
   "label": "有害或无害",
-  "explanation": "判断原因",
+  "confidence": "高/中/低",
+  "patient_summary": "患者和临床表现摘要",
+  "mngs_evidence": ["检测组织、reads、覆盖率、丰度和排名"],
+  "clinical_match": "病例表现与文献证据的匹配说明",
+  "explanation": "判定或既有判定的解释",
   "evidence": [
     {
-      "source": "证据编号或来源名称",
-      "support_type": "支持有害/支持无害/背景知识/同属类比/证据不足",
-      "summary": "该证据如何影响判断"
+      "source": "真实文献标题、来源类型和文件",
+      "support_type": "目标物种直接匹配/同属或相关病原群参考",
+      "summary": "该证据如何影响当前解读"
     }
   ],
-  "limitations": "缺少哪些关键证据或需要临床补充验证的信息"
+  "limitations": ["证据缺口和需要补充验证的内容"],
+  "review_items": ["建议医生复核的事项"]
 }
 ```
 
-如果后续做评测，只需要读取 `label` 字段即可；如果用于医生辅助解读，可以展示完整解释和证据链。
-
-### 导出可解释性 PDF
-
-项目提供了对当前 mNGS 结构化回答的 PDF 导出功能。导出使用聊天记录中已经生成的 JSON，不会再次调用模型，也不会修改原始文章或判别结果。
-
-安装依赖后启动项目：
-
-```bash
-python -m pip install -r requirements.txt
-python app.py
-```
-
-在界面完成一次 mNGS 病原判别后，点击“下载 PDF 报告”即可下载报告；也可以点击“重新生成 PDF”。报告包含既有结论、患者摘要、mNGS 检出证据、临床证据匹配、致病性资料适用范围、证据局限和建议复核项。PDF 渲染器位于 `src/cyber_doctor/reporting/explainability_pdf.py`，项目适配器位于 `src/cyber_doctor/reporting/mngs_report.py`。
+模型只能引用检索结果中真实出现的来源。病例自身的 reads、覆盖率和样本信息可以用于解释，但不能伪装成文献来源。
 
 ### 医生审阅与报告版本
 
-mNGS 初判完成后，页面会创建一个独立的报告会话。连续分析不同输入会保留为多个会话，可从“病例 / 报告会话”切换；一个输入包含多例时，医生可以选择审阅全部病例或指定病例。医生意见需要选择类型和关联章节，提交后生成新的完整报告版本，并记录意见、目标病例和版本关系。医生确认后仍可重新打开审阅。
+每次 mNGS 分析会创建一个浏览器会话内的报告会话。医生可以：
 
-会话中的原始病例摘要、mNGS 检测指标和知识库引用在报告修订时保持不变；医生意见用于更新解释、临床匹配、置信度、证据局限和复核项，初始判定标签由服务端强制保留。PDF 始终导出当前选中的报告会话和版本。mNGS 判定与修订使用结构化病例/报告状态，不把聊天历史作为病例事实来源。
+- 选择全部病例或指定病例审阅；
+- 选择补充事实、纠正事实、质疑证据、解释问题或要求改写；
+- 将意见关联到病例摘要、mNGS 检出证据、临床匹配、知识库证据、证据局限或复核项；
+- 根据意见生成完整的新报告版本；
+- 确认当前版本，或重新打开已确认的报告继续审阅。
 
-当前报告会话和版本快照保存在 Gradio 的浏览器会话状态中，不会落盘保存患者数据；服务重启或会话过期后不能恢复。需要跨设备、跨登录或长期审计时，应接入带身份认证和访问控制的数据库存储，再将医生身份写入审阅事件。
+报告会话和版本快照保存在当前浏览器会话状态中，服务重启或会话过期后不会恢复。当前版本没有身份认证、数据库持久化和跨设备审计能力。
 
-界面采用病例工作区、报告阅读区、医生审阅区的工作台布局。中间可切换可解释性报告、病例对话和审阅记录；检测指标与知识库引用可展开查看。顶部显示会话数、当前病原数、报告版本及确认状态，审阅和导出按钮随状态启用。窄屏自动改为纵向布局，并支持浏览器的明暗主题。样式位于 `src/cyber_doctor/resources/workbench.css`，安全转义的报告展示位于 `src/cyber_doctor/ui/workbench.py`。布局参考 [Open WebUI](https://github.com/open-webui/open-webui) 的会话侧栏及独立内容区，使用项目原有 Gradio 组件实现。
+### PDF 报告
 
-桌面端三栏高度一致并随窗口高度调整，超出内容在各栏内纵向滚动；中间的报告、对话和审阅记录共用固定高度的内容区，标签页始终留在顶部。
+报告确认或审阅过程中均可导出 PDF。PDF 使用当前已有的结构化结果和审阅版本，不会因为导出再次调用模型，也不会修改原始文献或病例输入。实现位于：
 
-建议知识库按来源类型组织为三个 collection：
+- `src/cyber_doctor/reporting/mngs_report.py`
+- `src/cyber_doctor/reporting/explainability_pdf.py`
 
-### Qwen + 本地结构化病原文档模式
+生成的文件默认写入项目根目录的 `outputs/`，该目录不提交到 Git。
 
-项目支持在 DGX 上直接运行 Gradio、Qwen 和病原文档匹配。当前 mNGS 判别路径默认按病原名称、种拉丁名、种中文名或 NameID 匹配结构化 JSON，不调用 Milvus 向量数据库。结构化文档根目录由 `STRUCTURED_KNOWLEDGE_ROOT` 配置，目录下每个病原文件夹中的 PubMed 和 UpToDate JSON 会一起提供给模型；两种来源仍按各自的字段结构处理。
+## 病原知识库与离线数据准备
 
-DGX 上的 `.env` 可配置为：
+病原知识库不是运行时临时联网搜索得到的。运行时读取已经整理好的结构化 JSON；文献采集、原文保存和五维知识整理属于离线数据准备。
+
+病原记录以一个 JSON 文件或病原目录中的多个 JSON 文件保存，包含病原名称与分类、物种描述、致病性、毒力因子、耐药性、治疗与预后等知识，并保留每条信息的来源。原始 PubMed/PMC 文献与结构化结果分开保存，便于追溯。
+
+当前数据准备脚本包括：
+
+```text
+scripts/data/collect_pubmed_fulltext.py
+    PubMed/PMC 全文采集，保留 source.xml、article.md 和元数据
+
+scripts/data/extract_pathogen_descriptions_qwen.py
+    从 positive.jsonl 的 Description 提取有来源支持的病原知识
+
+scripts/data/build_pathogen_knowledge_all.py
+    依据已有结果和文献构建全量病原知识文件
+
+scripts/ops/uptodate_browser_search.py
+    在人工登录的 UpToDate 浏览器会话中采集文章 Markdown
+```
+
+这些脚本的输出、原始文献、模型检查点和患者数据应放在 `outputs/` 或 DGX 的独立数据目录，不要提交到 Git。
+
+## 配置
+
+复制配置模板：
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell 可以使用：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+DGX 上使用 Qwen OpenAI 兼容服务时，至少配置：
 
 ```env
 LLM_BASE_URL=http://127.0.0.1:8000/v1
 LLM_API_KEY=服务要求的值
 MODEL_NAME=qwen3.8-27b
-STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/experiments/cyber-doctor-qwen/structured
+LLM_PROVIDER=qwen
+QWEN_ENABLE_THINKING=0
+STRUCTURED_KNOWLEDGE_ROOT=/home/zhangyue/outputs/病原结构化信息
 GRADIO_SERVER_PORT=10032
 ```
 
-Qwen 的 OpenAI 兼容 Chat Completions 接口由项目现有 OpenAI 客户端调用，`LLM_BASE_URL` 指向 Qwen 服务的 `/v1` 根地址。
-Qwen3 系列默认关闭 thinking，避免推理过程混入结构化 JSON；如需开启，可将 `QWEN_ENABLE_THINKING=1`。
+可选的知识源设置：
 
-提交完整 mNGS 病例或可识别的病原名称后，系统先匹配结构化文章，再调用 Qwen 生成判别解释。mNGS 回答流结束后，PDF 自动生成到项目根目录的 `outputs/` 文件夹，页面中的 PDF 文件控件随即提供下载；点击下载后由浏览器决定本机最终保存位置。页面仍保留“重新生成 PDF”按钮。
+```env
+# 默认值为 structured
+MNGS_KNOWLEDGE_SOURCE=structured
 
-PDF 在服务端生成并嵌入服务端字体，不依赖用户本机安装字体。Linux/DGX 部署建议安装文泉驿微米黑：
-
-```bash
-sudo apt-get install fonts-wqy-microhei
+# 只有在明确准备 GraphML 数据时才使用 graphml
+MNGS_GRAPHML_PATH=/path/to/pathogen.graphml
 ```
 
-也可以通过 `CYBER_DOCTOR_PDF_FONT` 指定其他可嵌入的中文 TrueType 字体。找不到可嵌入字体时，PDF 导出会明确失败并提示配置，不会静默生成字体异常的文件。
+`structured` 是当前默认且推荐的 mNGS 文献证据路径。`graphml` 是兼容入口，不是当前病原五维知识库的主要存储方式。
 
-本机通过 SSH 隧道访问 DGX 页面：
+## 启动
+
+项目要求 Python 3.11 或更高版本：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py
+```
+
+Windows PowerShell：
 
 ```powershell
-ssh -i $env:USERPROFILE\.ssh\codex_qianwan_dgx `
-  -L 10032:127.0.0.1:10032 `
-  zhangyue@10.8.0.22
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python app.py
 ```
 
-随后打开 `http://127.0.0.1:10032`。如果希望浏览器每次下载时询问保存位置，需要在本机浏览器中开启“下载前询问每个文件的保存位置”；Python/Gradio 页面不能直接控制浏览器的本机保存对话框。
+默认访问地址为：
 
 ```text
-pathogen_knowledge       # 病原基础信息、别名、分类、常见感染部位、致病性、定植/背景可能性
-medical_textbooks        # 医学书籍、教材、指南、专家共识
-medical_case_reports     # PDF案例报告转换后的结构化病例证据
+http://127.0.0.1:10032
 ```
 
-当前运行时代码默认使用 `medical_textbooks` collection，并通过 `src/cyber_doctor/model/rag/medical_retriever.py` 执行 BGE-M3 dense/sparse 混合检索。旧的 `cyber_doctor_knowledge`、FAISS、ModelScope/LangChain 知识库检索链路已经移除。
+如果 Qwen 和 Gradio 都运行在 DGX，可通过 SSH 隧道访问：
 
-## 技术栈
-
-- **Python**
-- **PyTorch**
-- **Transformers**
-- **Gradio**：简易的UI和交互生成工具
-- **Milvus**：离线持久化医学知识库向量和稀疏向量
-- **BGE-M3 / FlagEmbedding**：生成 dense/sparse 混合检索向量
-- **RAG**：结合检索与生成的技术，用于增强生成式模型的回答质量
-- **Knowledge Graph (Neo4j)**：Neo4j图数据库的配置和Cypher语句操作
-- **OpenAi & zhipuai**：相关大模型sdk调用方法
-
-Option：
-
-- **Ollama**：本地大模型api封装
-
-## 如何启动项目
-
-1. **从Github上拉取项目**
-
-   ```bash
-   git clone https://github.com/henuzzy/cyber-doctor.git
-   或者
-   git clone git@github.com:henuzzy/cyber-doctor.git
-   ```
-   
-2. **配置大模型API**
-
-   复制 `.env.example`为 `.env`，填写 `.env`内相关API配置。
-
-   API目前支持：
-
-   1. 所有支持OpenAI SDK接口的API，包括
-      - [智谱AI](https://open.bigmodel.cn/)
-      - [豆包大模型](https://www.volcengine.com/experience/ark?utm_term=202502dsinvite&ac=DSASUQY5&rc=II9TBGSX)
-      - [硅基流动集成平台](https://cloud.siliconflow.cn/i/VWOdVvvM)
-      - [deepseek](https://platform.deepseek.com/)
-      - [千问Qwen](https://bailian.console.aliyun.com/)
-   2. Ollama封装的本地API
-
-
-3. **填写 `.env` 和 `config/config-web.yaml` 配置**
-
-   RAG 运行时主要读取 `.env` 中的 Milvus 和 BGE-M3 配置：
-
-   ```env
-   MILVUS_URI=http://127.0.0.1:19530
-   MEDICAL_TEXTBOOK_COLLECTION=medical_textbooks
-   BGE_M3_MODEL=D:\models\huggingface\hub\models--BAAI--bge-m3
-   BGE_M3_DEVICE=auto
-   BGE_M3_USE_FP16=1
-   MEDICAL_RETRIEVE_TOP_K=12
-   MEDICAL_RETRIEVE_CANDIDATE_K=40
-   MEDICAL_DENSE_WEIGHT=0.7
-   MEDICAL_SPARSE_WEIGHT=0.3
-   ```
-
-   `config/config-web.yaml` 目前主要保留知识图谱等非 RAG 配置；医学知识库检索不再使用旧的 `cyber_doctor_knowledge` 配置。
-
-4. **创建python环境（python>=3.10，建议为3.10）**
-
-   建议使用conda管理环境
-
-   ```bash
-   conda create --name myenv python=3.10
-   conda activate myenv
-   ```
-
-   安装依赖库
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-   
-5. **启动项目**
-
-   ```bash
-   python app.py
-   ```
-
-   启动后访问 http://localhost:7860
-
-## Milvus知识库与离线入库
-
-本项目的知识库 RAG 已经切换为 Milvus。文档不应该在用户提问时临时嵌入，而应该提前离线入库。
-
-1. **启动 Milvus**
-
-   本地或服务器上启动 Milvus Standalone，确保端口 `19530` 可访问。DGX Spark/aarch64 环境如果 Docker Hub 拉取慢，可以使用镜像代理。
-
-2. **准备清洗后的医学 chunk 目录**
-
-   当前推荐先清洗 Markdown 医学书籍，再输出 chunk JSONL。示例目录为：
-
-   ```text
-   E:\华大医疗agent清洗版chunks
-   ```
-
-   原始 PDF/Markdown、清洗后资料和 chunk 文件都不要提交到 Git。当前 `.gitignore` 已忽略 `konwledge-base/`、`data/`、`.env`、`*.chunks.jsonl` 等本地数据。
-
-3. **离线嵌入医学 chunk**
-
-   ```bash
-   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
-   ```
-
-   如需删除旧 collection 并完全重建：
-
-   ```bash
-   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
-   ```
-
-   可以加一个检索探针：
-
-   ```bash
-   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
-   ```
-
-   运行时只使用 `src/cyber_doctor/model/rag/medical_retriever.py` 这一套 BGE-M3 混合检索器，不再有旧的 FAISS、ModelScope 或 LangChain 知识库检索入口。
-
-4. **当前推荐的文档流程**
-
-   ```text
-   原始 Markdown/PDF
-     -> Markdown 清洗
-     -> 医学 chunk JSONL
-     -> BGE-M3 生成 dense/sparse 向量
-     -> 写入 Milvus medical_textbooks collection
-   ```
-
-## UpToDate 在线检索与 Markdown 缓存
-
-UpToDate 登录通常需要人工输入账号密码和短信验证码。为了避免每次脚本结束后浏览器关闭导致重新登录，推荐先单独启动一个常驻 Chrome，再让 Playwright 通过 CDP 连接这个浏览器。
-
-1. **启动常驻 Chrome**
-
-   在 PowerShell 中执行：
-
-   ```powershell
-   & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
-     --remote-debugging-port=9222 `
-     --user-data-dir="E:\华大医疗agent资料\uptodate_cdp_chrome_profile" `
-     --new-window "https://www.uptodate.cn/contents/search"
-   ```
-
-   如果 Chrome 不在上述路径，可以先查找：
-
-   ```powershell
-   Get-Command chrome
-   ```
-
-   浏览器打开后，在该 Chrome 中手动登录 UpToDate 并完成短信验证码。只要这个 Chrome 不手动关闭，后续脚本运行结束也不会关闭浏览器，登录态可以继续复用。
-
-2. **按搜索结果顺序缓存文章 Markdown**
-
-   下面命令会搜索指定菌名，按 UpToDate 搜索页展示顺序抓取前 3 篇主文章，并将每篇文章按网页标题保存为一个 Markdown 文件。默认不生成 JSONL 日志，只生成 `.md` 缓存。
-
-   ```powershell
-   python scripts\uptodate_browser_search.py `
-     --query "Shigella dysenteriae" `
-     --cdp-url "http://127.0.0.1:9222" `
-     --cache-dir "E:\华大医疗agent资料\uptodate_cache_md" `
-     --open-details `
-     --detail-top-k 3 `
-     --detail-max-chars 500000 `
-     --max-results 10 `
-     --click-more 1 `
-     --refresh-cache
-   ```
-
-   关键参数说明：
-
-   - `--cdp-url`：连接已登录的常驻 Chrome，脚本结束不会关闭该浏览器。
-   - `--cache-dir`：Markdown 文章缓存目录。
-   - `--detail-top-k`：按搜索页展示顺序缓存前 N 篇主文章。
-   - `--detail-max-chars`：单篇文章最大缓存字符数。
-   - `--refresh-cache`：同名 Markdown 已存在时强制刷新。
-
-   如需调试搜索结果顺序，可以临时加 `--output` 输出 JSONL 日志：
-
-   ```powershell
-   python scripts\uptodate_browser_search.py `
-     --query "Shigella dysenteriae" `
-     --output "E:\华大医疗agent资料\uptodate_debug.jsonl" `
-     --cdp-url "http://127.0.0.1:9222" `
-     --cache-dir "E:\华大医疗agent资料\uptodate_cache_md" `
-     --open-details `
-     --detail-top-k 3 `
-     --detail-max-chars 500000 `
-     --max-results 10 `
-     --click-more 1 `
-     --refresh-cache
-   ```
-
-3. **DGX 远程 Chrome 登录、保持登录态及抓取**
-
-   DGX 上的 Chrome 只监听服务器本机 `127.0.0.1:9222`，登录时通过 SSH 暂时转发到本机。Chrome 使用独立用户目录，SSH 隧道关闭后 Chrome 和登录态仍会保留。
-
-   在 DGX 启动常驻 Chrome（首次或 Chrome 未运行时）：
-
-   ```bash
-   nohup setsid /home/zhangyue/outputs/start_uptodate_chrome_9222.sh \
-     >/home/zhangyue/outputs/uptodate_chrome_9222.log 2>&1 </dev/null &
-   ```
-
-   本机建立临时转发：
-
-   ```powershell
-   ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no `
-     -N -L 19222:127.0.0.1:9222 zhangyue@10.8.0.22
-   ```
-
-   另开一个本机 PowerShell，启动已有的登录辅助界面：
-
-   ```powershell
-   cd E:\PythonProject\cyber-doctor
-   D:\python3.11\python.exe scripts\uptodate_login_helper_local.py `
-     --cdp-url http://127.0.0.1:19222 `
-     --host 127.0.0.1 `
-     --port 18088
-   ```
-
-   打开 `http://127.0.0.1:18088`，在界面中填写账号、密码、短信验证码；若出现 Cookie 弹窗，先点“接受所有 Cookie”。确认登录完成后，可以关闭本地登录辅助程序和 SSH 隧道，**不要关闭 DGX 上的 Chrome**。
-
-   DGX 的脚本运行环境固定为 `/home/zhangyue/.venvs/uptodate/bin/python`。只抓某个病原搜索结果中的第 1 篇文章（不生成 JSONL 日志）：
-
-   ```bash
-   /home/zhangyue/.venvs/uptodate/bin/python \
-     /home/zhangyue/cyber-doctor/scripts/ops/uptodate_browser_search.py \
-     --query "Mycobacterium paragordonae" \
-     --cdp-url http://127.0.0.1:9222 \
-     --max-results 10 \
-     --open-details \
-     --detail-top-k 1 \
-     --detail-max-chars 500000 \
-     --cache-dir /home/zhangyue/outputs/uptodate_single_Mycobacterium_paragordonae \
-     --refresh-cache
-   ```
-
-   `--detail-top-k 1` 表示严格按搜索页面顺序，只打开第一篇主文章。`--cache-dir` 内只会写对应文章的 Markdown。
-
-## 医学文档清洗建议
-
-医学书籍和案例报告建议采用不同清洗策略。
-
-案例报告通常较短，适合抽取为病例证据块：
-
-```text
-文献基础信息
-病原背景
-患者基础情况
-样本和检测证据
-诊断证据
-治疗和转归
-作者讨论
-参考文献
+```powershell
+ssh -L 10032:127.0.0.1:10032 zhangyue@10.8.0.22
 ```
 
-医学书籍通常较大，建议先清洗再按章节切分：
+然后在本机浏览器打开 `http://127.0.0.1:10032`。
 
-```text
-删除：封面、版权页、CIP、编委、主编简介、二维码说明、目录、无文字意义图片占位
-保留：正文、章节标题、小节标题、列表、表格、药名、剂量、单位、病原名、疾病名、检查指标
-```
+## 验证
 
-清洗规则建议：
-
-```text
-1. 删除控制字符，例如 \x08、\x07
-2. 删除乱码占位符，例如 �
-3. 删除 Markdown 图片占位符，例如 ![](images/xxx.jpg)
-4. 删除空标题行，例如单独一行 `#`
-5. 保留独立图注行和正文中的图号引用，避免误删医学正文
-6. 保留表格数据，表格尽量作为完整 chunk 入库
-```
-
-正文里的医学内容不能因为包含图号而被删除。当前策略是只删除 `![](images/xxx.jpg)` 这类图片占位符，图注和“图3-4-3”这类文本引用默认保留。
-
-后续如果文档格式问题较多，可以使用本地 7B/8B Instruct 模型辅助处理低质量片段，但建议规则清洗为主，模型只负责标题层级、段落合并、表格整理和 JSON 结构化，不应让模型改写医学事实。
-
-项目提供了一个规则清洗脚本，可用于处理 MinerU 转出的医学书籍 Markdown：
+运行全部测试：
 
 ```bash
-python scripts/data/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md"
+python -m unittest discover -s tests -v
 ```
 
-也可以批量清洗整个目录：
+重点测试包括：
 
-```bash
-python scripts/data/clean_medical_md_book.py --input-dir "E:\华大医疗agent资料" --output-dir "E:\华大医疗agent清洗版资料"
-```
-
-默认只生成清洗后的 `.md` 文件，不生成 `*.sections.jsonl`。后续 chunk 入库时会直接从 clean markdown 的标题层级中重新解析章节路径。
-
-如果调试时确实需要导出标题结构，可以额外指定：
-
-```bash
-python scripts/data/clean_medical_md_book.py "E:\华大医疗agent资料\30《口腔科学》第10版.md" -o "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.md" --records-output "E:\华大医疗agent清洗版资料\30《口腔科学》第10版.sections.jsonl"
-```
-
-### 医学书籍 Markdown 切分
-
-清洗后的书籍不要直接整本入库，先切成医疗 RAG 专用 chunk：
-
-```bash
-python scripts/data/chunk_medical_md.py --input-dir "E:\华大医疗agent清洗版资料" --output-dir "E:\华大医疗agent清洗版chunks" --max-chars 1200 --overlap-chars 150 --doc-type textbook
-```
-
-脚本会输出 `*.chunks.jsonl`，每条记录包含：
-
-```text
-chunk_id        稳定 chunk id
-answer_text     原文片段，用于回答和引用
-search_text     加了书名、文档类型、章节路径的检索文本
-metadata        书名、章节路径、行号、block_type 等来源信息
-```
-
-切分策略不是简单固定长度切割：
-
-```text
-1. 先解析 clean markdown 标题层级，保存章节路径
-2. 表格作为独立块保留
-3. 说明型编号条目尽量拆成单独 chunk，例如“1. 额肌...”“2. 眼轮匝肌...”
-4. 短标签列表保持整体，例如图例编号、神经分支编号
-5. 普通段落按字符数切分，默认 1200 字符，150 字符 overlap
-6. 长文本优先在句号、分号、冒号等边界截断
-```
-
-### 医学 chunk 入 Milvus
-
-生成 chunk 后，用 BGE-M3 写入 Milvus。建议书籍、案例报告、病原信息分别使用不同 collection：
-
-```bash
-python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
-```
-
-第一次创建 collection 或需要完全重建时：
-
-```bash
-python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16 --recreate
-```
-
-可以加一个检索探针：
-
-```bash
-python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --probe-query "房颤怎么办" --probe-top-k 12 --candidate-k 40
-```
-
-医学检索探针默认使用 BGE-M3 混合召回：
-
-```text
-dense 召回 candidate_k 条，默认 40
-sparse 召回 candidate_k 条，默认 40
-按权重融合排序，默认 dense_weight=0.7、sparse_weight=0.3
-最终返回 top_k 条，默认 12
-```
-
-如果传入的是 HuggingFace cache 根目录，例如 `D:\models\huggingface\hub\models--BAAI--bge-m3`，脚本会自动解析到 `snapshots/<hash>` 下的真实模型目录。GPU embedding 需要 CUDA 版 PyTorch；如果当前环境是 CPU 版 PyTorch，`--device cuda` 会直接报错，避免悄悄退回 CPU 慢跑。
-
-Option：
-
-1. **下载Neo4j图数据库（使用知识图谱检索增强功能的必要条件）**
-
-2. **配置一个专业领域的图数据库**
-
-   推荐开源知识图谱平台：[OpenKG](http://openkg.cn/datasets-type/)
-
-   如果想配置医疗健康领域的数据库，推荐下载如下开源知识图谱
-
-   [面向家庭常见疾病的知识图谱](http://data.openkg.cn/dataset/medicalgraph)（本项目使用了该图谱，使用该图谱可以不更改config/config-web.yaml的相关配置文件）
-
-   1. 下载到本地后，改.dump文件名为你要导入的数据库名称（eg：neo4j.dump）
-   2. 关闭neo4j服务
-
-      ```
-      Windows: neo4j stop
-      Linux: sudo neo4j stop
-      ```
-   3. 运行导入指令
-
-      ```
-      neo4j-admin database load <database-name> --from-path=/path/to/dump-folder/ --overwrite-destination=true
-      ```
-
-      `--from-path`：存放对应"database-name".dump文件的文件夹路径
-
-      `--overwrite-destination`：**注意会覆盖你原先数据库中的数据**
-   4. 若运行上面的命令后输出
-
-      ```
-      The loaded database 'neo4j' is not on a supported version (current format: AF4.3.0 introduced in 4.3.0). Use the 'neo4j-admin database migrate' command
-      ```
-
-      还需要运行如下命令
-
-      ```
-      neo4j-admin database migrate 
-      ```
-   5. 启动neo4j服务
-
-      ```
-      Windows: neo4j start
-      Linux: sudo neo4j start
-      ```
+- mNGS 病例字段解析与多病例输入；
+- mNGS 报告工作台和报告会话；
+- 医生意见、报告版本、确认和重新打开；
+- PDF 报告渲染；
+- Description 知识提取；
+- PubMed/PMC 全文采集；
+- 全量病原知识库格式和证据范围校验。
 
 ## 项目结构
 
-当前 `src/` 布局见[项目目录说明](docs/project-layout.md)，本地开发与脚本分组见[开发说明](docs/development.md)。下面的旧版目录树已折叠，仅留作仓库历史参考。
-
-<details>
-<summary>旧版目录树（已过期）</summary>
-
-```
+```text
 cyber-doctor/
-├── .env                            # 环境配置文件，存储API密钥、模型配置等敏感信息
-├── .env.example                    # 环境配置文件示例，展示需要配置的环境变量
-├── .gitignore                      # Git版本控制忽略文件配置
-├── LICENSE                         # 项目许可证文件
-├── README.md                       # 项目中文说明文档
-├── README_en.md                    # 项目英文说明文档
-├── __init__.py                     # Python包初始化文件
-├── app.py                          # 项目启动文件，构建Gradio界面，处理多模态信息，可自定义ASR模型和界面
-├── env.py                          # 封装读取.env文件的接口
-├── requirements.txt                # 项目依赖包列表
-├── Internet/                       # 联网搜索相关功能模块
-│   ├── __init__.py                   # 包初始化文件
-│   ├── Internet_chain.py             # 联网搜索链，协调关键词提取、搜索爬取和检索过程
-│   ├── Internet_prompt.py            # 大模型特征工程，提取搜索关键词
-│   └── retrieve_Internet.py          # 调用model/Internet接口检索搜索结果
-├── README/                         # 存放项目文档相关资源
-│   ├── __init__.py                   # 包初始化文件
-├── client/                         # 大模型客户端模块，作为用户与API的桥梁
-│   ├── __init__.py                   # 包初始化文件
-│   ├── LLMclientbase.py              # 大模型客户端基类定义
-│   ├── LLMclientgeneric.py           # 封装调用大模型API接口进行对话生成的通用函数
-│   ├── clientfactory.py              # 封装构建不同大模型客户端的工厂类
-│   ├── ourAPI/                       # 自定义API接口实现
-│   │   ├── __init__.py                 # 包初始化文件
-│   │   └── client.py                   # 自定义API客户端实现
-│   └── zhipuAPI/                     # 智谱AI API接口实现
-│       ├── __init__.py                 # 包初始化文件
-│       └── client.py                   # 智谱AI客户端实现
-├── config/                         # 配置文件目录
-│   ├── __init__.py                   # 包初始化文件
-│   ├── config-web.yaml               # 不同(Web)开发环境下的应用配置文件
-│   └── config.py                     # 配置加载和处理模块
-├── kg/                             # 知识图谱相关功能模块
-│   └── Graph.py                      # 知识图谱对象实现
-├── model/                          # 检索功能使用到的模型相关功能模块，包括联网RAG、知识库RAG、知识图谱RAG
-│   ├── __init__.py                   # 包初始化文件
-│   ├── model_base.py                 # 模型基类定义
-│   ├── KG/                           # 知识图谱RAG的匹配自动机实现
-│   │   ├── __init__.py                 # 包初始化文件
-│   │   ├── data_utils.py               # 知识图谱数据处理工具
-│   │   ├── search_model.py             # 构建知识图谱RAG的匹配自动机
-│   │   └── search_service.py           # 知识图谱RAG的匹配自动机接口
-│   └── RAG/                          # 知识库RAG向量库实现
-│       ├── __init__.py                 # 包初始化文件
-│       ├── document.py                  # 轻量文档对象
-│       ├── medical_retriever.py         # BGE-M3 + Milvus dense/sparse 混合检索器
-│       └── retrieve_service.py         # 知识库RAG向量库接口
-├── mngs/                           # mNGS单病原有害/无害判别链路
-│   ├── __init__.py                   # 包初始化文件
-│   └── rag_judge.py                  # mNGS输入解析、RAG检索、判别prompt构造
-├── qa/                             # 问答系统核心模块
-│   ├── __init__.py                   # 包初始化文件
-│   ├── answer.py                     # 根据问题类型选择对应的工具函数生成回答
-│   ├── function_tool.py              # 工具函数集合
-│   ├── prompt_templates.py           # 提示词模板定义
-│   ├── purpose_type.py               # 问题类型定义
-│   └── question_parser.py            # 问题类型解析判断
-├── rag/                            # 检索增强生成模块
-│   ├── __init__.py                   # 包初始化文件
-│   ├── rag_chain.py                  # RAG链式调用实现
-│   └── retrieve/                     # 检索功能实现
-│       ├── __init__.py                 # 包初始化文件
-│       └── retrieve_document.py        # 文档检索实现
-├── scripts/                        # 离线脚本
-│   ├── clean_medical_md_book.py       # 清洗医学书籍 Markdown
-│   ├── chunk_medical_md.py            # 将清洗后的 Markdown 切为医学 chunk
-│   └── ingest_medical_chunks_milvus.py # 将医学 chunk 离线嵌入 Milvus
-└── resource/                       # 资源文件目录，存放图片等静态资源
+├── app.py                         # 启动 Gradio mNGS 工作台
+├── src/cyber_doctor/
+│   ├── app.py                     # UI、输入处理、报告工作流
+│   ├── mngs/                      # mNGS 病例解析、证据检索、判定提示词
+│   ├── model/rag/                 # 结构化病原文献和其他检索适配器
+│   ├── reporting/                 # mNGS 结果适配与 PDF 报告
+│   ├── ui/                        # 报告工作台 HTML 渲染
+│   ├── resources/                 # 运行时头像和工作台样式
+│   ├── client/                    # OpenAI 兼容模型客户端
+│   └── qa/                        # 输入类型路由和兼容工具入口
+├── scripts/data/                  # 病原知识和文献离线处理
+├── scripts/diagnostics/           # mNGS 检索和输入诊断
+├── scripts/ops/                   # UpToDate 等数据采集辅助工具
+├── scripts/reports/               # 独立报告处理脚本
+├── tests/                         # 回归测试
+├── docs/                          # 开发、布局和数据流程说明
+└── outputs/                       # 本地运行输出，Git 忽略
 ```
 
-</details>
+## 不属于当前交付范围的代码
 
-## 常见问题
+仓库中仍保留一部分早期通用医疗助手的兼容代码，但它们不是当前 mNGS 报告解读项目的交付功能：
 
-1. **为什么 mNGS 判别没有检索到知识库？**
+- 通用文本聊天；
+- 图片生成和图片描述；
+- 通用联网搜索问答；
+- 通用知识图谱问答；
+- 与 mNGS 报告无关的通用教材 RAG 入库和检索。
 
-   先确认 Milvus 已启动，`.env` 中的 `MILVUS_URI`、`MEDICAL_TEXTBOOK_COLLECTION`、`BGE_M3_MODEL` 正确，并且已经运行过：
+这些入口仍可在 `src/cyber_doctor/qa/`、`src/cyber_doctor/internet/`、`src/cyber_doctor/kg/` 和部分 `src/cyber_doctor/model/` 文件中看到，主要用于兼容旧代码和已有实验。后续若要收敛成纯 mNGS 产品，可以将这些路由、客户端和对应配置从应用入口中移除；本 README 不再把它们描述为项目功能。
 
-   ```bash
-   python scripts/data/ingest_medical_chunks_milvus.py --input-dir "E:\华大医疗agent清洗版chunks" --collection medical_textbooks --uri http://127.0.0.1:19530 --model "D:\models\huggingface\hub\models--BAAI--bge-m3" --device cuda --use-fp16
-   ```
+## 当前限制
 
-2. **为什么运行时没有再从原始 PDF/Markdown 自动嵌入？**
-
-   当前设计是离线入库、在线只检索。原始文档需要先清洗、chunk，再通过 `scripts/data/ingest_medical_chunks_milvus.py` 写入 Milvus。用户提问时不会临时解析和嵌入文档。
-
-3. **mNGS 判别为什么输出 JSON，而不是只输出“有害/无害”？**
-
-   业务使用需要可解释证据链，所以默认输出 `label + explanation + evidence + limitations`。评测时只读取 `label` 字段即可。
-
-## 项目现状
-
-项目从原本Django+vue框架中分离，在开发时我们是设计了一个简单的前后端框架和界面的。可以提供简单的登录、注册、创建用户自己的知识库和可交互的对知识库进行增删改查的功能。但由于该部分不是本人负责，我对如何教大家如何配置该部分代码还不是很懂，各位如果希望本项目能提供相关功能，欢迎反馈，我再对项目进行更新。
-
-你可能发现了本项目类似一个大杂烩，将众多功能缝合到了一起。但其实在单独的每个功能实现上，还有很大的优化空间。
-
-例如对知识图谱的处理，目前只是匹配所有实体和与该实体直接相连的关系。其实可以增添对关系类型的判断等，优化知识图谱对大模型输出的影响，避免干扰大模型的输出。这些将在我有时间的时候进行更新，也欢迎你的意见与建议，敬请期待吧。
+- 解读结果依赖病例输入质量和结构化文献覆盖，不能替代临床验证。
+- 没有匹配到目标物种时，系统可能使用属级或相关病原群证据，并在结果中标注范围。
+- 当前报告会话只保存在浏览器会话状态中，尚未接入用户身份、数据库和长期审计。
+- 结构化知识库和原始文献不随源代码发布，需要单独配置 `STRUCTURED_KNOWLEDGE_ROOT`。
+- 运行时默认不主动联网采集文献；文献采集和五维知识整理需要单独运行数据准备脚本。
 

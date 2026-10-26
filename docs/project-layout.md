@@ -7,7 +7,8 @@ not application source, and lives at the repository root beside `src/`.
 ```text
 cyber-doctor/
 ├── docs/
-│   └── assets/ui/          # Screenshots and project illustrations
+│   ├── development.md      # Local setup and script groups
+│   └── project-layout.md   # Source and runtime data boundaries
 ├── scripts/
 │   ├── data/               # Cleaning, chunking, catalog and ingestion tools
 │   ├── diagnostics/        # Retrieval inspection and data validation
