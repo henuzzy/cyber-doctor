@@ -46,7 +46,7 @@ Qwen 生成结构化 mNGS 解读
 
 ### 证据驱动的 mNGS 解读
 
-默认从 `STRUCTURED_KNOWLEDGE_ROOT` 指定的结构化病原文献目录读取证据。检索优先使用目标物种；没有目标物种文献时，可以回退到属或相关病原群，但结果会标注证据范围，避免把属级信息写成目标物种事实。
+运行时分别从 `FIVE_DIMENSION_KNOWLEDGE_ROOT` 读取五维病原知识档案，从 `STRUCTURED_KNOWLEDGE_ROOT` 读取逐篇结构化文献。前者提供病原概述与来源，后者提供具体文献事实和原文摘录。检索优先使用目标物种；没有目标物种文献时，可以回退到属或相关病原群，但结果会标注证据范围，避免把属级信息写成目标物种事实。
 
 模型输出的核心字段为：
 
@@ -105,6 +105,9 @@ Qwen 生成结构化 mNGS 解读
 scripts/data/collect_pubmed_fulltext.py
     PubMed/PMC 全文采集，保留 source.xml、article.md 和元数据
 
+scripts/data/extract_first20_structured.py
+    逐篇读取原始 Markdown，调用 Qwen，生成带原文证据的结构化文章 JSON
+
 scripts/data/extract_pathogen_descriptions_qwen.py
     从 positive.jsonl 的 Description 提取有来源支持的病原知识
 
@@ -115,7 +118,92 @@ scripts/ops/uptodate_browser_search.py
     在人工登录的 UpToDate 浏览器会话中采集文章 Markdown
 ```
 
-这些脚本的输出、原始文献、模型检查点和患者数据应放在 `outputs/` 或 DGX 的独立数据目录，不要提交到 Git。
+### 第一步：放置原始文献和已有五维知识库
+
+建议在项目目录之外单独建立数据目录，例如与项目并列的 `cyber-doctor-data/`。下面是示例布局，目录名称和位置可以自行调整，程序通过命令行参数或环境变量定位数据：
+
+```text
+任意工作目录/
+├── cyber-doctor/                         # Git 项目代码
+│   ├── app.py
+│   ├── .env                             # 本机运行配置，不提交
+│   └── scripts/data/extract_first20_structured.py
+└── cyber-doctor-data/                    # 独立数据目录，不随代码发布
+    ├── raw-literature/                   # 放原始“病原文献”的内容
+    │   ├── PubMed/病原目录/文章目录/article.md
+    │   └── UpToDate/病原目录/文章目录/article.md
+    ├── structured-articles/              # 抽取命令的输出目录
+    │   ├── articles/                     # 每篇 Markdown 对应一个 JSON
+    │   ├── manifest.json
+    │   ├── checkpoint.json
+    │   └── summary.json
+    └── knowledge/
+        └── pathogen_knowledge_all_simple.json  # 放已有的五维病原知识库
+```
+
+- 将原始 PubMed/UpToDate Markdown 放入 `raw-literature/`，保留已有子目录及邻近的 `metadata.json`。实际文献目录不必完全遵循上面的示例层级，脚本会递归查找 `.md` 和 `.markdown`。
+- 保留文献元数据中的病原名称、种属信息和 NameID，便于抽取结果被运行时按病原检索；未知字段不要自行补造。
+- 将你们已经提取好的五维 JSON 放入 `knowledge/`。文件名可以不同，后续配置指向实际文件即可。
+- `structured-articles/` 用于保存逐篇文献抽取结果，必须位于原始文献目录之外。
+
+### 第二步：调用 Qwen，将原始文献转换成逐篇 JSON
+
+先按下文安装 Python 依赖，并确保 Qwen OpenAI 兼容接口可访问，然后在**项目根目录**执行。下面的 `127.0.0.1:8000` 表示运行抽取脚本的机器上已有模型服务；若模型在另一台机器，需换成可访问的接口地址。
+
+Linux / DGX：
+
+```bash
+DATA_ROOT="$(cd .. && pwd)/cyber-doctor-data"
+
+# 先检查发现了哪些原始文章，不调用模型。
+python scripts/data/extract_first20_structured.py \
+  --literature-root "$DATA_ROOT/raw-literature" --dry-run
+
+# 确认文件列表后，逐篇调用 Qwen 并写出 JSON。
+python scripts/data/extract_first20_structured.py \
+  --literature-root "$DATA_ROOT/raw-literature" \
+  --output-dir "$DATA_ROOT/structured-articles" \
+  --endpoint http://127.0.0.1:8000/v1/chat/completions \
+  --model qwen3.8-27b
+```
+
+Windows PowerShell：
+
+```powershell
+$DataRoot = Join-Path (Split-Path (Get-Location).Path -Parent) 'cyber-doctor-data'
+
+python scripts/data/extract_first20_structured.py `
+  --literature-root "$DataRoot/raw-literature" --dry-run
+
+python scripts/data/extract_first20_structured.py `
+  --literature-root "$DataRoot/raw-literature" `
+  --output-dir "$DataRoot/structured-articles" `
+  --endpoint http://127.0.0.1:8000/v1/chat/completions `
+  --model qwen3.8-27b
+```
+
+脚本保留了历史文件名 `first20`，但**默认处理指定目录下的全部文章**，没有固定机器路径或默认前 20 个病原限制。需要小批量试跑时，显式添加 `--limit 1` 等参数。接口需要鉴权时，在当前终端设置 `LLM_API_KEY` 环境变量。
+
+每篇文章生成一份 `articles/<原相对路径>.json`，保留来源、PMID/DOI、病原信息、证据范围和原文摘录。摘录必须在输入原文中可定位；默认每篇失败后重试一次，其他文章继续。重复执行同一命令时，会跳过已完成且校验有效、原文及相关配置未变化的结果。通过 `summary.json` 的 `all_done`、`failed` 和 `checkpoint.json` 的 `failed_files` 检查是否全部完成。
+
+此命令生成的是**逐篇文章 JSON**；已有的五维知识库仍单独放在 `knowledge/` 中。抽取脚本读取命令行参数和当前进程的环境变量，**不会自动加载项目 `.env`**，因此上述命令显式指定了输入、输出、接口和模型。
+
+### 第三步：配置应用读取这两类 JSON
+
+先将项目根目录的 `.env.example` 复制为 `.env`（已有 `.env` 时直接修改），再将下列路径替换为实际的绝对路径。Windows 可以使用 `E:/...` 形式的路径：
+
+```env
+LITERATURE_ROOT=/absolute/path/cyber-doctor-data/raw-literature
+STRUCTURED_ARTICLE_OUTPUT_ROOT=/absolute/path/cyber-doctor-data/structured-articles
+STRUCTURED_KNOWLEDGE_ROOT=/absolute/path/cyber-doctor-data/structured-articles
+FIVE_DIMENSION_KNOWLEDGE_ROOT=/absolute/path/cyber-doctor-data/knowledge/pathogen_knowledge_all_simple.json
+```
+
+`STRUCTURED_KNOWLEDGE_ROOT` 应指向第二步的输出目录，`FIVE_DIMENSION_KNOWLEDGE_ROOT` 应指向已经准备好的五维档案文件。前两个变量用于记录离线抽取的输入/输出位置；抽取时仍需通过命令行传入，或先将它们导出为当前进程的环境变量。网页应用启动时会加载项目 `.env`，修改后需重启应用。
+
+原始文献仅用于离线抽取和证据追溯；病例解读时同时读取五维档案和逐篇结构化 JSON。已有可用逐篇 JSON 时，可直接放到指定目录并跳过第二步。原始文献、两类知识 JSON、检查点、缓存和患者数据均为运行时数据，不提交到 Git。
+
+抽取格式和更多参数说明见 [病原文献抽取与运行时知识检索](docs/pathogen-literature-and-runtime-knowledge.md)。
 
 ## 配置
 
@@ -139,8 +227,8 @@ LLM_API_KEY=服务要求的值
 MODEL_NAME=qwen3.8-27b
 LLM_PROVIDER=qwen
 QWEN_ENABLE_THINKING=0
-STRUCTURED_KNOWLEDGE_ROOT=/path/to/structured-articles
-FIVE_DIMENSION_KNOWLEDGE_ROOT=/path/to/pathogen_knowledge_all_simple.json
+STRUCTURED_KNOWLEDGE_ROOT=/absolute/path/cyber-doctor-data/structured-articles
+FIVE_DIMENSION_KNOWLEDGE_ROOT=/absolute/path/cyber-doctor-data/knowledge/pathogen_knowledge_all_simple.json
 GRADIO_SERVER_PORT=10032
 ```
 
