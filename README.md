@@ -231,18 +231,6 @@ cyber-doctor/
 └── outputs/                       # 本地运行输出，Git 忽略
 ```
 
-## 不属于当前交付范围的代码
-
-仓库中仍保留一部分早期通用医疗助手的兼容代码，但它们不是当前 mNGS 报告解读项目的交付功能：
-
-- 通用文本聊天；
-- 图片生成和图片描述；
-- 通用联网搜索问答；
-- 通用知识图谱问答；
-- 与 mNGS 报告无关的通用教材 RAG 入库和检索。
-
-这些入口仍可在 `src/cyber_doctor/qa/`、`src/cyber_doctor/internet/`、`src/cyber_doctor/kg/` 和部分 `src/cyber_doctor/model/` 文件中看到，主要用于兼容旧代码和已有实验。后续若要收敛成纯 mNGS 产品，可以将这些路由、客户端和对应配置从应用入口中移除；本 README 不再把它们描述为项目功能。
-
 ## 当前限制
 
 - 解读结果依赖病例输入质量和结构化文献覆盖，不能替代临床验证。
@@ -250,9 +238,3 @@ cyber-doctor/
 - 当前报告会话只保存在浏览器会话状态中，尚未接入用户身份、数据库和长期审计。
 - 结构化知识库和原始文献不随源代码发布，需要单独配置 `STRUCTURED_KNOWLEDGE_ROOT`。
 - 运行时默认不主动联网采集文献；文献采集和五维知识整理需要单独运行数据准备脚本。
-
-## 病原五维档案与逐篇文献
-
-运行时同时读取五维病原知识档案和逐篇结构化文献。可以直接输入病原中文/拉丁名、属名或 NameID 查询五维档案；mNGS 解读会并行检索五维概要和逐篇 PubMed/UpToDate 证据，并区分目标物种直接证据与属级或相关病原群背景。
-
-原始 Markdown 的通用逐篇抽取命令、配置方式、输出格式和续跑说明见 [`docs/pathogen-literature-and-runtime-knowledge.md`](docs/pathogen-literature-and-runtime-knowledge.md)。`scripts/data/extract_first20_structured.py` 默认处理指定文献目录下的全部文章，不设置固定机器路径或默认病原数量。原始文献、结构化文章 JSON、五维档案和检查点均为运行时数据，不提交到 Git。
