@@ -21,6 +21,10 @@ logs/
 project/settings.py
 
 data/
+# Keep the full-text collector visible while retaining existing data ignores.
+!/scripts/data/
+/scripts/data/*
+!/scripts/data/collect_pubmed_fulltext.py
 konwledge-base/
 *.chunks.jsonl
 *.sections.jsonl
